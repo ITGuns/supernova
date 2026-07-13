@@ -1,0 +1,6 @@
+{
+  "name": "@nova/storefront",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Nova eCom storefront (Next.js) — catalog/inventory synced from core services. Implemented in Phase 4."
+}

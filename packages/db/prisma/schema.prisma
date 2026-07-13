@@ -1,0 +1,1331 @@
+// Nova POS — data model
+// Implements docs/architecture.md. Conventions:
+//   - IDs: cuid2 strings (client-generatable for offline). Server-only append logs use BigInt autoincrement.
+//   - Money: integer minor units in `...Minor` fields, paired with an ISO-4217 `currency` on the aggregate root.
+//   - Tenancy: `orgId` on every tenant-owned row; `storeId` on store-scoped rows; both lead composite indexes.
+//   - Sync/audit: createdAt, updatedAt, version (optimistic lock + sync vector), deletedAt (soft delete) on mutable rows.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// 1. TENANCY & IDENTITY (RBAC)
+// ============================================================
+
+model Organization {
+  id           String    @id @default(cuid())
+  name         String
+  slug         String    @unique
+  baseCurrency String    @db.Char(3) // ISO-4217; org default
+  country      String    @db.Char(2)
+  status       OrgStatus @default(ACTIVE)
+  settings     Json      @default("{}") // feature flags, tax mode, rounding rule
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  version      Int       @default(0)
+
+  stores Store[]
+  users  User[]
+}
+
+model Store {
+  id                String      @id @default(cuid())
+  orgId             String
+  org               Organization @relation(fields: [orgId], references: [id])
+  name              String
+  code              String
+  channelTypes      Channel[]
+  currency          String      @db.Char(3)
+  timezone          String // IANA tz — Z-report day boundaries
+  address           Json
+  taxJurisdictionId String?
+  status            StoreStatus @default(ACTIVE)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  deletedAt         DateTime?
+  version           Int         @default(0)
+
+  registers Register[]
+  inventory InventoryLevel[]
+
+  @@unique([orgId, code])
+  @@index([orgId, status])
+}
+
+model Register {
+  id                String         @id @default(cuid())
+  orgId             String
+  storeId           String
+  store             Store          @relation(fields: [storeId], references: [id])
+  name              String
+  deviceId          String?
+  paymentTerminalId String? // Stripe Terminal reader id (adapter-specific)
+  status            RegisterStatus @default(ACTIVE)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  version           Int            @default(0)
+
+  drawerSessions CashDrawerSession[]
+
+  @@unique([orgId, storeId, name])
+  @@index([orgId, storeId])
+}
+
+model User {
+  id           String       @id @default(cuid())
+  orgId        String
+  org          Organization @relation(fields: [orgId], references: [id])
+  email        String
+  passwordHash String? // null for SSO-only
+  pin          String? // hashed short PIN for fast register login
+  firstName    String
+  lastName     String
+  status       UserStatus   @default(ACTIVE)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  deletedAt    DateTime?
+  version      Int          @default(0)
+
+  memberships   Membership[]
+  refreshTokens RefreshToken[]
+
+  @@unique([orgId, email])
+  @@index([orgId, status])
+}
+
+model Role {
+  id       String  @id @default(cuid())
+  orgId    String
+  name     String
+  isSystem Boolean @default(false) // seeded, non-deletable
+
+  permissions RolePermission[]
+  memberships Membership[]
+
+  @@unique([orgId, name])
+}
+
+model Permission {
+  id          String @id @default(cuid())
+  key         String @unique // global catalog, not tenant-scoped
+  description String
+
+  roles RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  orgId     String
+  userId    String
+  storeId   String? // null = org-wide (e.g. owner)
+  roleId    String
+  user      User     @relation(fields: [userId], references: [id])
+  role      Role     @relation(fields: [roleId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([userId, storeId, roleId])
+  @@index([orgId, storeId])
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  tokenHash String    @unique
+  deviceId  String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// ============================================================
+// 2. CATALOG
+// ============================================================
+
+model Category {
+  id        String     @id @default(cuid())
+  orgId     String
+  parentId  String?
+  parent    Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children  Category[] @relation("CategoryTree")
+  name      String
+  slug      String
+  sortOrder Int        @default(0)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  deletedAt DateTime?
+  version   Int        @default(0)
+
+  products Product[]
+
+  @@unique([orgId, slug])
+  @@index([orgId, parentId])
+}
+
+model Product {
+  id             String        @id @default(cuid())
+  orgId          String
+  categoryId     String?
+  category       Category?     @relation(fields: [categoryId], references: [id])
+  name           String
+  description    String?
+  productType    ProductType   @default(STANDARD) // STANDARD | SERVICE | GIFT_CARD | COMBO | BUNDLE
+  taxGroupId     String?
+  brand          String?
+  trackInventory Boolean       @default(true)
+  status         ProductStatus @default(ACTIVE)
+  attributes     Json          @default("{}")
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  deletedAt      DateTime?
+  version        Int           @default(0)
+
+  variants       ProductVariant[]
+  modifierGroups ProductModifierGroup[]
+
+  @@index([orgId, categoryId, status])
+  @@index([orgId, taxGroupId])
+}
+
+model ProductVariant {
+  id             String        @id @default(cuid())
+  orgId          String
+  productId      String
+  product        Product       @relation(fields: [productId], references: [id])
+  sku            String
+  barcode        String?
+  name           String // e.g. "Large / Red"
+  optionValues   Json          @default("{}") // {size:"L", color:"Red"}
+  basePriceMinor Int
+  costMinor      Int?
+  weightGrams    Int?
+  status         ProductStatus @default(ACTIVE)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  deletedAt      DateTime?
+  version        Int           @default(0)
+
+  inventory          InventoryLevel[]
+  priceBookEntries   PriceBookEntry[]
+  orderLines         OrderLine[]
+  purchaseOrderLines PurchaseOrderLine[]
+  stockTransferLines StockTransferLine[]
+
+  @@unique([orgId, sku])
+  @@index([orgId, barcode])
+  @@index([productId])
+}
+
+model ModifierGroup {
+  id            String            @id @default(cuid())
+  orgId         String
+  name          String
+  selectionType ModifierSelection @default(SINGLE) // SINGLE | MULTI
+  minSelect     Int               @default(0)
+  maxSelect     Int?
+  required      Boolean           @default(false)
+
+  modifiers Modifier[]
+  products  ProductModifierGroup[]
+
+  @@index([orgId])
+}
+
+model Modifier {
+  id              String        @id @default(cuid())
+  orgId           String
+  groupId         String
+  group           ModifierGroup @relation(fields: [groupId], references: [id])
+  name            String
+  priceDeltaMinor Int           @default(0)
+  linkedVariantId String? // deduct inventory for this add-on
+  sortOrder       Int           @default(0)
+
+  @@index([orgId, groupId])
+}
+
+model ProductModifierGroup {
+  productId String
+  groupId   String
+  product   Product       @relation(fields: [productId], references: [id])
+  group     ModifierGroup @relation(fields: [groupId], references: [id])
+  sortOrder Int           @default(0)
+
+  @@id([productId, groupId])
+}
+
+// ============================================================
+// 3. PRICING & DISCOUNTS
+// ============================================================
+
+model PriceBook {
+  id              String          @id @default(cuid())
+  orgId           String
+  name            String
+  currency        String          @db.Char(3)
+  channel         Channel? // null = all channels
+  storeId         String? // null = all stores
+  customerGroupId String? // null = all customers
+  priority        Int             @default(0) // higher wins on overlap
+  startsAt        DateTime?
+  endsAt          DateTime?
+  status          PriceBookStatus @default(ACTIVE)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  version         Int             @default(0)
+
+  entries PriceBookEntry[]
+
+  @@index([orgId, channel, storeId, customerGroupId, priority])
+}
+
+model PriceBookEntry {
+  id          String         @id @default(cuid())
+  orgId       String
+  priceBookId String
+  variantId   String
+  priceBook   PriceBook      @relation(fields: [priceBookId], references: [id])
+  variant     ProductVariant @relation(fields: [variantId], references: [id])
+  priceMinor  Int
+  minQty      Int            @default(1) // qty-break tiers
+
+  @@unique([priceBookId, variantId, minQty])
+  @@index([orgId, variantId])
+}
+
+model PricingRule {
+  id              String          @id @default(cuid())
+  orgId           String
+  name            String
+  ruleType        PricingRuleType // PERCENT_OFF | AMOUNT_OFF | BUY_X_GET_Y | BUNDLE
+  channel         Channel?
+  storeId         String?
+  customerGroupId String?
+  conditions      Json // {categoryIds, variantIds, minQty, minSubtotalMinor}
+  effect          Json // {percent|amountMinor|getQty|getVariantId}
+  stackable       Boolean         @default(false)
+  priority        Int             @default(0)
+  usageLimit      Int?
+  startsAt        DateTime?
+  endsAt          DateTime?
+  status          RuleStatus      @default(ACTIVE)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  version         Int             @default(0)
+
+  @@index([orgId, channel, storeId, status, priority])
+}
+
+model Discount {
+  id                 String         @id @default(cuid())
+  orgId              String
+  code               String? // null = ad-hoc manager discount
+  name               String
+  scope              DiscountScope // ORDER | LINE
+  method             DiscountMethod // PERCENT | FIXED_AMOUNT | PRICE_OVERRIDE
+  value              Int // percent (basis pts) or amountMinor
+  requiresPermission String?
+  minSubtotalMinor   Int?
+  usageLimit         Int?
+  perCustomerLimit   Int?
+  startsAt           DateTime?
+  endsAt             DateTime?
+  status             RuleStatus     @default(ACTIVE)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  version            Int            @default(0)
+
+  @@unique([orgId, code])
+  @@index([orgId, status])
+}
+
+// ============================================================
+// 4. TAX ENGINE
+// ============================================================
+
+model TaxJurisdiction {
+  id       String            @id @default(cuid())
+  orgId    String
+  name     String
+  country  String            @db.Char(2)
+  region   String? // state/province
+  parentId String?
+  parent   TaxJurisdiction?  @relation("JurTree", fields: [parentId], references: [id])
+  children TaxJurisdiction[] @relation("JurTree")
+
+  rates TaxRate[]
+
+  @@index([orgId, country, region])
+}
+
+model TaxRate {
+  id              String          @id @default(cuid())
+  orgId           String
+  jurisdictionId  String
+  jurisdiction    TaxJurisdiction @relation(fields: [jurisdictionId], references: [id])
+  name            String
+  rateBasisPoints Int // 8.25% = 825
+  compound        Boolean         @default(false) // tax-on-tax ordering
+  priority        Int             @default(0)
+  inclusive       Boolean         @default(false) // price-inclusive (VAT) vs added-on
+  startsAt        DateTime?
+  endsAt          DateTime?
+
+  rules TaxRule[]
+
+  @@index([orgId, jurisdictionId])
+}
+
+model TaxGroup {
+  id    String @id @default(cuid())
+  orgId String
+  name  String
+
+  rules TaxRule[]
+
+  @@unique([orgId, name])
+}
+
+model TaxRule {
+  id                      String   @id @default(cuid())
+  orgId                   String
+  taxGroupId              String
+  taxRateId               String
+  taxGroup                TaxGroup @relation(fields: [taxGroupId], references: [id])
+  taxRate                 TaxRate  @relation(fields: [taxRateId], references: [id])
+  overrideRateBasisPoints Int?
+  exempt                  Boolean  @default(false)
+
+  @@unique([taxGroupId, taxRateId])
+  @@index([orgId])
+}
+
+model TaxExemption {
+  id             String    @id @default(cuid())
+  orgId          String
+  customerId     String
+  customer       Customer  @relation(fields: [customerId], references: [id])
+  jurisdictionId String? // null = all
+  certificateNo  String
+  expiresAt      DateTime?
+
+  @@index([orgId, customerId])
+}
+
+// ============================================================
+// 5. CUSTOMER, LOYALTY, GIFT CARDS
+// ============================================================
+
+model CustomerGroup {
+  id                 String  @id @default(cuid())
+  orgId              String
+  name               String
+  defaultPriceBookId String?
+
+  customers Customer[]
+
+  @@unique([orgId, name])
+}
+
+model Customer {
+  id        String         @id @default(cuid())
+  orgId     String
+  groupId   String?
+  group     CustomerGroup? @relation(fields: [groupId], references: [id])
+  email     String?
+  phone     String?
+  firstName String?
+  lastName  String?
+  company   String?
+  addresses Json           @default("[]")
+  taxExempt Boolean        @default(false)
+  status    CustomerStatus @default(ACTIVE)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  deletedAt DateTime?
+  version   Int            @default(0)
+
+  orders     Order[]
+  loyalty    LoyaltyAccount?
+  giftCards  GiftCard[]
+  exemptions TaxExemption[]
+
+  @@index([orgId, email])
+  @@index([orgId, phone])
+}
+
+model LoyaltyAccount {
+  id            String   @id @default(cuid())
+  orgId         String
+  customerId    String   @unique
+  customer      Customer @relation(fields: [customerId], references: [id])
+  pointsBalance Int      @default(0)
+  tier          String?
+  version       Int      @default(0)
+
+  transactions LoyaltyTransaction[]
+
+  @@index([orgId])
+}
+
+model LoyaltyTransaction {
+  id        String         @id @default(cuid())
+  orgId     String
+  accountId String
+  account   LoyaltyAccount @relation(fields: [accountId], references: [id])
+  orderId   String?
+  type      LoyaltyTxnType // EARN | REDEEM | ADJUST | EXPIRE
+  points    Int // signed
+  createdAt DateTime       @default(now())
+
+  @@index([orgId, accountId, createdAt])
+}
+
+model GiftCard {
+  id           String         @id @default(cuid())
+  orgId        String
+  code         String // hashed/tokenized in practice
+  customerId   String?
+  customer     Customer?      @relation(fields: [customerId], references: [id])
+  currency     String         @db.Char(3)
+  balanceMinor Int            @default(0)
+  status       GiftCardStatus @default(ACTIVE)
+  expiresAt    DateTime?
+  version      Int            @default(0)
+
+  transactions GiftCardTransaction[]
+
+  @@unique([orgId, code])
+  @@index([orgId, status])
+}
+
+model GiftCardTransaction {
+  id          String          @id @default(cuid())
+  orgId       String
+  giftCardId  String
+  giftCard    GiftCard        @relation(fields: [giftCardId], references: [id])
+  orderId     String?
+  paymentId   String?
+  type        GiftCardTxnType // ISSUE | RELOAD | REDEEM | REFUND | ADJUST
+  amountMinor Int // signed
+  createdAt   DateTime        @default(now())
+
+  @@index([orgId, giftCardId, createdAt])
+}
+
+// ============================================================
+// 6. INVENTORY & SUPPLY
+// ============================================================
+
+model InventoryLevel {
+  id           String         @id @default(cuid())
+  orgId        String
+  storeId      String
+  variantId    String
+  store        Store          @relation(fields: [storeId], references: [id])
+  variant      ProductVariant @relation(fields: [variantId], references: [id])
+  onHand       Int            @default(0) // materialized from StockMovement ledger
+  reserved     Int            @default(0) // allocated to open orders (available = onHand-reserved)
+  reorderPoint Int?
+  reorderQty   Int?
+  updatedAt    DateTime       @updatedAt
+  version      Int            @default(0) // optimistic lock for concurrent decrements
+
+  @@unique([storeId, variantId])
+  @@index([orgId, storeId])
+  @@index([orgId, variantId])
+}
+
+model StockMovement {
+  id            String       @id @default(cuid())
+  orgId         String
+  storeId       String
+  variantId     String
+  type          MovementType // SALE | RETURN | PO_RECEIVE | TRANSFER_IN | TRANSFER_OUT | ADJUSTMENT | COUNT | WASTAGE
+  quantity      Int // signed: -1 sale, +N receive
+  unitCostMinor Int?
+  balanceAfter  Int // onHand snapshot after applying
+  refType       String? // "Order"|"PurchaseOrder"|"StockTransfer"|"Count"
+  refId         String?
+  reason        String?
+  userId        String?
+  createdAt     DateTime     @default(now())
+  // append-only: no updatedAt / version
+
+  @@index([orgId, storeId, variantId, createdAt])
+  @@index([refType, refId])
+}
+
+model Supplier {
+  id        String         @id @default(cuid())
+  orgId     String
+  name      String
+  email     String?
+  phone     String?
+  address   Json?
+  currency  String?        @db.Char(3)
+  status    SupplierStatus @default(ACTIVE)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  version   Int            @default(0)
+
+  purchaseOrders PurchaseOrder[]
+
+  @@unique([orgId, name])
+}
+
+model PurchaseOrder {
+  id         String    @id @default(cuid())
+  orgId      String
+  storeId    String // receiving location
+  supplierId String
+  supplier   Supplier  @relation(fields: [supplierId], references: [id])
+  poNumber   String
+  status     POStatus  @default(DRAFT) // DRAFT|SENT|PARTIAL|RECEIVED|CANCELLED
+  currency   String    @db.Char(3)
+  expectedAt DateTime?
+  totalMinor Int       @default(0)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  version    Int       @default(0)
+
+  lines PurchaseOrderLine[]
+
+  @@unique([orgId, poNumber])
+  @@index([orgId, storeId, status])
+}
+
+model PurchaseOrderLine {
+  id              String         @id @default(cuid())
+  orgId           String
+  purchaseOrderId String
+  variantId       String
+  purchaseOrder   PurchaseOrder  @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  variant         ProductVariant @relation(fields: [variantId], references: [id])
+  qtyOrdered      Int
+  qtyReceived     Int            @default(0)
+  unitCostMinor   Int
+
+  @@index([purchaseOrderId])
+}
+
+model StockTransfer {
+  id          String         @id @default(cuid())
+  orgId       String
+  fromStoreId String
+  toStoreId   String
+  status      TransferStatus @default(DRAFT) // DRAFT|IN_TRANSIT|RECEIVED|CANCELLED
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  version     Int            @default(0)
+
+  lines StockTransferLine[]
+
+  @@index([orgId, fromStoreId, status])
+  @@index([orgId, toStoreId, status])
+}
+
+model StockTransferLine {
+  id          String         @id @default(cuid())
+  orgId       String
+  transferId  String
+  variantId   String
+  transfer    StockTransfer  @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  variant     ProductVariant @relation(fields: [variantId], references: [id])
+  qtySent     Int
+  qtyReceived Int            @default(0)
+
+  @@index([transferId])
+}
+
+// ============================================================
+// 7. UNIFIED ORDER PIPELINE & PAYMENTS
+// ============================================================
+
+model Order {
+  id          String  @id @default(cuid()) // client-generatable (offline register/tab)
+  orgId       String
+  storeId     String
+  channel     Channel // RETAIL | RESTAURANT | ECOM  ← discriminator
+  orderNumber String // human ref; per-store sequence
+  customerId  String?
+  customer    Customer? @relation(fields: [customerId], references: [id])
+
+  state            OrderState       @default(DRAFT)
+  fulfillmentState FulfillmentState @default(UNFULFILLED)
+  currency         String           @db.Char(3)
+
+  // money snapshot (all minor units, computed by domain engine)
+  subtotalMinor      Int @default(0)
+  discountTotalMinor Int @default(0)
+  taxTotalMinor      Int @default(0)
+  tipMinor           Int @default(0)
+  totalMinor         Int @default(0)
+  paidMinor          Int @default(0)
+  refundedMinor      Int @default(0)
+
+  // channel-specific FKs (nullable)
+  registerId          String? // RETAIL
+  cashDrawerSessionId String? // RETAIL
+  tableId             String? // RESTAURANT
+  serverId            String? // RESTAURANT
+  parentOrderId       String? // RESTAURANT split-check parent
+
+  metadata Json      @default("{}")
+  placedAt DateTime?
+  closedAt DateTime?
+
+  // sync/audit
+  deviceId  String? // originating device (offline provenance)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  version   Int      @default(0)
+
+  lines          OrderLine[]
+  discounts      OrderDiscount[]
+  taxLines       OrderTaxLine[]
+  payments       Payment[]
+  refunds        Refund[]
+  kitchenTickets KitchenTicket[]
+  restaurant     RestaurantOrder?
+  ecom           EcomOrder?
+  events         OrderEvent[]
+
+  @@unique([orgId, storeId, orderNumber])
+  @@index([orgId, storeId, channel, state])
+  @@index([orgId, customerId])
+  @@index([storeId, updatedAt]) // sync-pull cursor
+}
+
+model OrderLine {
+  id                String          @id @default(cuid())
+  orgId             String
+  orderId           String
+  order             Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variantId         String? // null for ad-hoc/custom line
+  variant           ProductVariant? @relation(fields: [variantId], references: [id])
+  name              String // snapshot of product name at sale time
+  quantity          Int
+  unitPriceMinor    Int // resolved list price (post price-book, pre discount)
+  lineDiscountMinor Int             @default(0)
+  lineSubtotalMinor Int // (unitPrice*qty) - lineDiscount, pre-tax
+  taxMinor          Int             @default(0)
+  costMinor         Int?
+  taxGroupId        String?
+  courseNo          Int? // RESTAURANT firing course
+  seatNo            Int? // RESTAURANT seat assignment
+  notes             String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  version           Int             @default(0)
+
+  modifiers OrderLineModifier[]
+  taxLines  OrderTaxLine[]
+
+  @@index([orgId, orderId])
+  @@index([variantId])
+}
+
+model OrderLineModifier {
+  id              String    @id @default(cuid())
+  orgId           String
+  orderLineId     String
+  orderLine       OrderLine @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+  modifierId      String? // ref (may be deleted later)
+  name            String
+  priceDeltaMinor Int       @default(0)
+
+  @@index([orderLineId])
+}
+
+model OrderDiscount {
+  id              String  @id @default(cuid())
+  orgId           String
+  orderId         String
+  order           Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderLineId     String? // null = order-level
+  sourceType      String // "Discount"|"PricingRule"
+  sourceId        String?
+  name            String
+  amountMinor     Int
+  appliedByUserId String?
+
+  @@index([orgId, orderId])
+}
+
+model OrderTaxLine {
+  id               String     @id @default(cuid())
+  orgId            String
+  orderId          String
+  orderLineId      String?
+  order            Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderLine        OrderLine? @relation(fields: [orderLineId], references: [id])
+  taxRateId        String? // ref for reporting
+  taxName          String // snapshot ("CA State 8.25%")
+  rateBasisPoints  Int
+  taxableBaseMinor Int
+  taxAmountMinor   Int
+  inclusive        Boolean    @default(false)
+
+  @@index([orgId, orderId])
+}
+
+model Payment {
+  id                  String       @id @default(cuid())
+  orgId               String
+  orderId             String
+  order               Order        @relation(fields: [orderId], references: [id])
+  method              PaymentMethod // CASH | CARD | GIFT_CARD | STORE_CREDIT | LOYALTY | EXTERNAL
+  state               PaymentState @default(PENDING)
+  amountMinor         Int
+  tipMinor            Int          @default(0)
+  currency            String       @db.Char(3)
+  cashDrawerSessionId String?
+  giftCardId          String?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  version             Int          @default(0)
+
+  providerRecord PaymentProviderRecord?
+  refunds        Refund[]
+
+  @@index([orgId, orderId])
+  @@index([orgId, state])
+}
+
+model PaymentProviderRecord {
+  id             String  @id @default(cuid())
+  orgId          String
+  paymentId      String  @unique
+  payment        Payment @relation(fields: [paymentId], references: [id])
+  provider       String // "mock" | "stripe" | "stripe_terminal"
+  providerRef    String // PaymentIntent / charge id
+  status         String // raw provider status
+  cardBrand      String?
+  last4          String?
+  rawPayload     Json
+  idempotencyKey String? @unique
+
+  @@index([orgId, provider, providerRef])
+}
+
+model Refund {
+  id          String       @id @default(cuid())
+  orgId       String
+  orderId     String
+  paymentId   String?
+  order       Order        @relation(fields: [orderId], references: [id])
+  payment     Payment?     @relation(fields: [paymentId], references: [id])
+  amountMinor Int
+  reason      String?
+  providerRef String?
+  state       PaymentState @default(PENDING)
+  createdAt   DateTime     @default(now())
+  version     Int          @default(0)
+
+  returnLines ReturnLine[]
+
+  @@index([orgId, orderId])
+}
+
+model ReturnLine {
+  id          String  @id @default(cuid())
+  orgId       String
+  refundId    String
+  orderLineId String
+  refund      Refund  @relation(fields: [refundId], references: [id], onDelete: Cascade)
+  quantity    Int
+  restock     Boolean @default(true) // if true → +stock movement
+  amountMinor Int
+
+  @@index([refundId])
+}
+
+// ============================================================
+// 8. CASH MANAGEMENT
+// ============================================================
+
+model CashDrawerSession {
+  id                 String       @id @default(cuid())
+  orgId              String
+  storeId            String
+  registerId         String
+  register           Register     @relation(fields: [registerId], references: [id])
+  openedByUserId     String
+  closedByUserId     String?
+  openingFloatMinor  Int
+  countedCloseMinor  Int? // physical count at close
+  expectedCloseMinor Int? // opening + cash sales - payouts (computed)
+  overShortMinor     Int? // countedClose - expectedClose
+  currency           String       @db.Char(3)
+  status             DrawerStatus @default(OPEN) // OPEN | CLOSED
+  openedAt           DateTime     @default(now())
+  closedAt           DateTime?
+  version            Int          @default(0)
+
+  movements CashMovement[]
+
+  @@index([orgId, storeId, registerId, status])
+}
+
+model CashMovement {
+  id          String            @id @default(cuid())
+  orgId       String
+  sessionId   String
+  session     CashDrawerSession @relation(fields: [sessionId], references: [id])
+  type        CashMovementType // SALE | REFUND | PAYOUT | PAYIN | DROP | TIP
+  amountMinor Int // signed
+  paymentId   String?
+  reason      String?
+  userId      String?
+  createdAt   DateTime          @default(now())
+
+  @@index([orgId, sessionId, createdAt])
+}
+
+// ============================================================
+// 9. RESTAURANT
+// ============================================================
+
+model Floor {
+  id      String @id @default(cuid())
+  orgId   String
+  storeId String
+  name    String // "Patio", "Main"
+  layout  Json   @default("{}") // canvas coords for admin map
+
+  tables RestaurantTable[]
+
+  @@index([orgId, storeId])
+}
+
+model RestaurantTable {
+  id       String      @id @default(cuid())
+  orgId    String
+  storeId  String
+  floorId  String
+  floor    Floor       @relation(fields: [floorId], references: [id])
+  label    String // "T12"
+  capacity Int         @default(2)
+  status   TableStatus @default(AVAILABLE) // AVAILABLE|SEATED|ORDERED|CHECK_DROPPED|DIRTY
+  posX     Int?
+  posY     Int?
+  version  Int         @default(0)
+
+  seats Seat[]
+
+  @@unique([orgId, storeId, label])
+  @@index([orgId, storeId, status])
+}
+
+model Seat {
+  id      String          @id @default(cuid())
+  orgId   String
+  tableId String
+  table   RestaurantTable @relation(fields: [tableId], references: [id])
+  seatNo  Int
+
+  @@unique([tableId, seatNo])
+}
+
+model Menu {
+  id         String     @id @default(cuid())
+  orgId      String
+  storeId    String?
+  name       String // "Dinner", "Happy Hour"
+  activeFrom String? // "17:00"
+  activeTo   String?
+  status     MenuStatus @default(ACTIVE)
+
+  items MenuItem[]
+
+  @@index([orgId, storeId])
+}
+
+model MenuItem {
+  id                 String  @id @default(cuid())
+  orgId              String
+  menuId             String
+  productId          String // → canonical Product/variant
+  menu               Menu    @relation(fields: [menuId], references: [id])
+  displayName        String?
+  priceOverrideMinor Int?
+  stationTag         String? // "grill"|"fry"|"bar" → KDS routing
+  sortOrder          Int     @default(0)
+  comboId            String?
+
+  @@index([orgId, menuId])
+  @@index([productId])
+}
+
+model Combo {
+  id         String @id @default(cuid())
+  orgId      String
+  name       String
+  priceMinor Int
+
+  components ComboComponent[]
+
+  @@index([orgId])
+}
+
+model ComboComponent {
+  id              String @id @default(cuid())
+  orgId           String
+  comboId         String
+  combo           Combo  @relation(fields: [comboId], references: [id], onDelete: Cascade)
+  name            String // "Choose a side"
+  choiceVariantIds Json // array of variant ids
+  minSelect       Int    @default(1)
+  maxSelect       Int    @default(1)
+
+  @@index([comboId])
+}
+
+model KitchenTicket {
+  id         String       @id @default(cuid())
+  orgId      String
+  storeId    String
+  orderId    String
+  order      Order        @relation(fields: [orderId], references: [id])
+  stationTag String // room = kds:{station}
+  courseNo   Int          @default(1)
+  status     TicketStatus @default(NEW) // NEW|IN_PROGRESS|READY|SERVED|RECALLED|VOID
+  firedAt    DateTime     @default(now())
+  bumpedAt   DateTime?
+  version    Int          @default(0)
+
+  items KitchenTicketItem[]
+
+  @@index([orgId, storeId, stationTag, status])
+  @@index([orderId])
+}
+
+model KitchenTicketItem {
+  id          String        @id @default(cuid())
+  orgId       String
+  ticketId    String
+  orderLineId String
+  ticket      KitchenTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  name        String // snapshot
+  quantity    Int
+  modifiers   Json          @default("[]") // snapshot for kitchen display
+  notes       String?
+  status      TicketStatus  @default(NEW)
+
+  @@index([ticketId])
+}
+
+// 1:1 typed channel extensions of Order
+model RestaurantOrder {
+  id          String  @id @default(cuid())
+  orderId     String  @unique
+  order       Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  tableId     String?
+  coverCount  Int     @default(1)
+  checkNumber Int?
+  seatMap     Json    @default("{}")
+}
+
+model EcomOrder {
+  id               String  @id @default(cuid())
+  orderId          String  @unique
+  order            Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  shippingAddress  Json
+  billingAddress   Json?
+  shippingMethod   String?
+  shippingMinor    Int     @default(0)
+  trackingNumber   String?
+  fulfillmentStatus String @default("pending")
+}
+
+// ============================================================
+// 10. AUDIT & SYNC (schema built now; sync ships Phase 5)
+// ============================================================
+
+model AuditLog {
+  id            BigInt   @id @default(autoincrement()) // pure server sequence, ordering matters
+  orgId         String
+  storeId       String?
+  actorUserId   String?
+  actorDeviceId String?
+  action        String // "order.void", "discount.apply", "price.update"
+  entityType    String
+  entityId      String
+  before        Json?
+  after         Json?
+  correlationId String?
+  ip            String?
+  createdAt     DateTime @default(now())
+
+  @@index([orgId, entityType, entityId])
+  @@index([orgId, createdAt])
+}
+
+model OutboxEvent {
+  id            String    @id @default(cuid())
+  orgId         String
+  storeId       String?
+  aggregateType String // "Order","StockMovement","Payment"...
+  aggregateId   String
+  eventType     String // "OrderPaid","StockAdjusted"
+  payload       Json
+  sequence      BigInt    @default(autoincrement()) // global ordering for consumers
+  publishedAt   DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([orgId, publishedAt])
+  @@index([aggregateType, aggregateId])
+}
+
+model OrderEvent {
+  id        String   @id @default(cuid())
+  orgId     String
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  type      String // "LineAdded","LineVoided","TenderApplied"...
+  payload   Json
+  deviceId  String? // provenance for offline merge
+  clientSeq Int // per-device monotonic seq (conflict ordering)
+  createdAt DateTime @default(now())
+
+  @@unique([orderId, deviceId, clientSeq]) // idempotent replay
+  @@index([orgId, orderId, createdAt])
+}
+
+model SyncCursor {
+  id           String   @id @default(cuid())
+  orgId        String
+  deviceId     String
+  entity       String
+  lastPulledAt DateTime
+  lastVersion  Int      @default(0)
+
+  @@unique([deviceId, entity])
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum Channel {
+  RETAIL
+  RESTAURANT
+  ECOM
+}
+
+enum OrderState {
+  DRAFT
+  OPEN
+  PARTIALLY_PAID
+  PAID
+  COMPLETED
+  CANCELLED
+  VOIDED
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+enum FulfillmentState {
+  UNFULFILLED
+  IN_PROGRESS
+  FULFILLED
+  PARTIALLY_RETURNED
+  RETURNED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  GIFT_CARD
+  STORE_CREDIT
+  LOYALTY
+  EXTERNAL
+}
+
+enum PaymentState {
+  PENDING
+  AUTHORIZED
+  CAPTURED
+  FAILED
+  VOIDED
+  REFUNDED
+}
+
+enum MovementType {
+  SALE
+  RETURN
+  PO_RECEIVE
+  TRANSFER_IN
+  TRANSFER_OUT
+  ADJUSTMENT
+  COUNT
+  WASTAGE
+}
+
+enum ProductType {
+  STANDARD
+  SERVICE
+  GIFT_CARD
+  COMBO
+  BUNDLE
+}
+
+enum ProductStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum ModifierSelection {
+  SINGLE
+  MULTI
+}
+
+enum PricingRuleType {
+  PERCENT_OFF
+  AMOUNT_OFF
+  BUY_X_GET_Y
+  BUNDLE
+}
+
+enum DiscountScope {
+  ORDER
+  LINE
+}
+
+enum DiscountMethod {
+  PERCENT
+  FIXED_AMOUNT
+  PRICE_OVERRIDE
+}
+
+enum RuleStatus {
+  ACTIVE
+  INACTIVE
+  EXPIRED
+}
+
+enum PriceBookStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum LoyaltyTxnType {
+  EARN
+  REDEEM
+  ADJUST
+  EXPIRE
+}
+
+enum GiftCardStatus {
+  ACTIVE
+  REDEEMED
+  EXPIRED
+  VOID
+}
+
+enum GiftCardTxnType {
+  ISSUE
+  RELOAD
+  REDEEM
+  REFUND
+  ADJUST
+}
+
+enum POStatus {
+  DRAFT
+  SENT
+  PARTIAL
+  RECEIVED
+  CANCELLED
+}
+
+enum TransferStatus {
+  DRAFT
+  IN_TRANSIT
+  RECEIVED
+  CANCELLED
+}
+
+enum SupplierStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum DrawerStatus {
+  OPEN
+  CLOSED
+}
+
+enum CashMovementType {
+  SALE
+  REFUND
+  PAYOUT
+  PAYIN
+  DROP
+  TIP
+}
+
+enum TableStatus {
+  AVAILABLE
+  SEATED
+  ORDERED
+  CHECK_DROPPED
+  DIRTY
+}
+
+enum TicketStatus {
+  NEW
+  IN_PROGRESS
+  READY
+  SERVED
+  RECALLED
+  VOID
+}
+
+enum MenuStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum OrgStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum StoreStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum RegisterStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum CustomerStatus {
+  ACTIVE
+  ARCHIVED
+}

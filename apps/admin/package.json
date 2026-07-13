@@ -1,0 +1,6 @@
+{
+  "name": "@nova/admin",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Nova admin — back-office console (catalog, inventory, reporting, settings). Implemented from Phase 1."
+}
