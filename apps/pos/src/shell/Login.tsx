@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUsers } from '../store/userStore';
+import { NovaLogo } from './NovaLogo';
 
 function Sneaker() {
   // Clean side-profile athletic sneaker, toe pointing right (~226 x 116 local units).
@@ -56,7 +57,7 @@ function LoginHero() {
         <rect x="380" y="490" width="92" height="18" rx="5" fill="#4b3df5" />
       </g>
       <g transform="translate(304 664)">
-        <rect x="0" y="-8" width="12" height="12" rx="3" fill="#4b3df5" transform="rotate(45 6 -2)" />
+        <path d="M6 -10 C6.5 -3.6 8.6 -2.5 12 -2 C8.6 -1.5 6.5 -0.4 6 6 C5.5 -0.4 3.4 -1.5 0 -2 C3.4 -2.5 5.5 -3.6 6 -10 Z" fill="#8b7bff" />
         <text x="19" y="2" fill="#eef0f4" fontSize="13" fontWeight="700">nova</text>
       </g>
 
@@ -95,7 +96,7 @@ export function Login() {
     <div className="login">
       <header className="login-top">
         <div className="login-brand">
-          <span className="topbar-logo">◆</span>
+          <span className="topbar-logo"><NovaLogo size={26} /></span>
           <span>nova</span>
         </div>
         <span className="login-help">Help</span>

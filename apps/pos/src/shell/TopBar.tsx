@@ -4,6 +4,7 @@ import { STORE } from '../data/catalog';
 import { useTheme } from '../store/themeStore';
 import { useUsers } from '../store/userStore';
 import { NotificationsDrawer } from './NotificationsDrawer';
+import { NovaLogo } from './NovaLogo';
 import { ProfileDrawer } from './ProfileDrawer';
 
 export function TopBar() {
@@ -20,7 +21,7 @@ export function TopBar() {
   return (
     <header className="topbar">
       <div className="topbar-brand">
-        <span className="topbar-logo">◆</span>
+        <span className="topbar-logo"><NovaLogo size={24} /></span>
         <span className="topbar-word">nova</span>
       </div>
       <div className="topbar-search">
