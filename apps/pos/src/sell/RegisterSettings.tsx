@@ -1,27 +1,31 @@
 import { useState } from 'react';
 import { Switch } from '../admin/controls';
-
-interface Layout {
-  id: string;
-  name: string;
-}
+import { useRegister } from '../store/registerStore';
 
 export function RegisterSettings() {
-  const [training, setTraining] = useState(false);
-  const [quickKeys, setQuickKeys] = useState(true);
-  const [layouts, setLayouts] = useState<Layout[]>([
-    { id: 'l1', name: 'all of it' },
-    { id: 'l2', name: 'New Layout' },
-    { id: 'l3', name: 'New Layout' },
-  ]);
-  const [current, setCurrent] = useState('l1');
+  const training = useRegister((s) => s.trainingMode);
+  const quickKeys = useRegister((s) => s.quickKeysEnabled);
+  const layouts = useRegister((s) => s.layouts);
+  const current = useRegister((s) => s.currentLayoutId);
+  const toggleTraining = useRegister((s) => s.toggleTraining);
+  const toggleQuickKeys = useRegister((s) => s.toggleQuickKeys);
+  const addLayout = useRegister((s) => s.addLayout);
+  const renameLayout = useRegister((s) => s.renameLayout);
+  const duplicateLayout = useRegister((s) => s.duplicateLayout);
+  const deleteLayout = useRegister((s) => s.deleteLayout);
+  const setCurrentLayout = useRegister((s) => s.setCurrentLayout);
 
-  const addLayout = () => setLayouts((l) => [...l, { id: `l${Date.now()}`, name: 'New Layout' }]);
-  const copyLayout = (id: string) => {
-    const src = layouts.find((l) => l.id === id);
-    if (src) setLayouts((l) => [...l, { id: `l${Date.now()}`, name: `${src.name} copy` }]);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+
+  const startRename = (id: string, name: string) => {
+    setEditingId(id);
+    setDraft(name);
   };
-  const deleteLayout = (id: string) => setLayouts((l) => (l.length > 1 ? l.filter((x) => x.id !== id) : l));
+  const commitRename = () => {
+    if (editingId) renameLayout(editingId, draft);
+    setEditingId(null);
+  };
 
   return (
     <main className="sell-page">
@@ -34,9 +38,15 @@ export function RegisterSettings() {
           <div className="rs-desc">Enable training mode if you’re new to Nova Retail and want to learn the ropes. You’ll be selling like a pro in no time.</div>
         </div>
         <div className="rs-main">
-          <button className="btn-primary" onClick={() => setTraining((t) => !t)}>
+          <button className="btn-primary" onClick={toggleTraining}>
             {training ? 'Disable training mode' : 'Enable training mode'}
           </button>
+          {training && (
+            <div className="rs-desc rs-training-note">
+              Training mode is on. Sales made on the register are marked as training and won’t
+              affect your inventory.
+            </div>
+          )}
         </div>
       </div>
 
@@ -49,7 +59,7 @@ export function RegisterSettings() {
         </div>
         <div className="rs-main">
           <div className="rs-toggle-row">
-            <Switch on={quickKeys} onClick={() => setQuickKeys((v) => !v)} />
+            <Switch on={quickKeys} onClick={toggleQuickKeys} />
             <div>
               <div className="rs-toggle-label">Enable quick keys for this register</div>
               <div className="rs-desc">Toggle the switch to enable your Quick Keys for your register. You can turn this back on at anytime without losing your settings</div>
@@ -62,16 +72,37 @@ export function RegisterSettings() {
               <div className="rs-layouts">
                 {layouts.map((l) => (
                   <div key={l.id} className="rs-layout">
-                    <span className="rs-layout-name">{l.name}</span>
+                    {editingId === l.id ? (
+                      <input
+                        className="rs-rename"
+                        value={draft}
+                        autoFocus
+                        onChange={(e) => setDraft(e.target.value)}
+                        onBlur={commitRename}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitRename();
+                          if (e.key === 'Escape') setEditingId(null);
+                        }}
+                      />
+                    ) : (
+                      <span className="rs-layout-name">{l.name}</span>
+                    )}
                     <div className="rs-layout-actions">
                       {current === l.id ? (
                         <span className="rs-current">Current Layout</span>
                       ) : (
-                        <button className="btn-s" onClick={() => setCurrent(l.id)}>Set as current layout</button>
+                        <button className="btn-s" onClick={() => setCurrentLayout(l.id)}>Set as current layout</button>
                       )}
-                      <span className="ic-edit" title="Rename">✎</span>
-                      <span className="rs-ic" title="Duplicate" onClick={() => copyLayout(l.id)}>⧉</span>
-                      <span className="rs-ic" title="Delete" onClick={() => deleteLayout(l.id)}>🗑</span>
+                      <button className="rs-ic ic-edit" title="Rename" onClick={() => startRename(l.id, l.name)}>✎</button>
+                      <button className="rs-ic" title="Duplicate" onClick={() => duplicateLayout(l.id)}>⧉</button>
+                      <button
+                        className="rs-ic"
+                        title={layouts.length <= 1 ? 'You need at least one layout' : 'Delete'}
+                        disabled={layouts.length <= 1}
+                        onClick={() => deleteLayout(l.id)}
+                      >
+                        🗑
+                      </button>
                     </div>
                   </div>
                 ))}

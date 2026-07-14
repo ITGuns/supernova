@@ -40,7 +40,7 @@ export function SalesHistory() {
     outlet: 'Main Outlet',
     note: '',
     totalMinor: s.totalMinor,
-    status: 'Completed',
+    status: s.training ? 'Training' : 'Completed',
     lines: s.lines.map((l) => ({ name: l.name, qty: l.quantity, priceMinor: l.unitPriceMinor })),
   }));
   const allSales = [...liveMapped, ...SEED];

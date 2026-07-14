@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { CatalogItem, TaxGroupId } from '../data/catalog';
 import { useProducts } from './productStore';
+import { useRegister } from './registerStore';
 
 export interface CartLine {
   lineId: string;
@@ -40,6 +41,7 @@ export interface CompletedSale {
   tenders: Tender[];
   changeMinor: number;
   at: number;
+  training?: boolean;
 }
 
 interface CartState {
@@ -151,18 +153,23 @@ export const useCart = create<CartState>()(
 
   completeSale: (sale) => {
     const state = get();
+    const training = useRegister.getState().trainingMode;
 
     // Draw down inventory: reduce each sold product's "Available to sell".
-    const prodStore = useProducts.getState();
-    for (const line of state.lines) {
-      const prod = prodStore.products.find((p) => p.id === line.variantId);
-      if (prod) prodStore.updateProduct(prod.id, { available: Math.max(0, prod.available - line.quantity) });
+    // Training-mode sales are practice runs and leave inventory untouched.
+    if (!training) {
+      const prodStore = useProducts.getState();
+      for (const line of state.lines) {
+        const prod = prodStore.products.find((p) => p.id === line.variantId);
+        if (prod) prodStore.updateProduct(prod.id, { available: Math.max(0, prod.available - line.quantity) });
+      }
     }
 
     const completed: CompletedSale = {
       ...sale,
       orderNumber: orderNumber(state.orderSeq),
       at: Date.now(),
+      training,
     };
     set({
       lines: [],

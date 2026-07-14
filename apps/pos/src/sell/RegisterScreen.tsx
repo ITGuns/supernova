@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useCart } from '../store/cartStore';
+import { useRegister } from '../store/registerStore';
 import { ParkedTray } from './ParkedTray';
 import { PayModal } from './PayModal';
 import { QuickKeys } from './QuickKeys';
@@ -18,8 +19,17 @@ export function RegisterScreen() {
   const park = useCart((s) => s.park);
   const empty = lines.length === 0;
 
+  const training = useRegister((s) => s.trainingMode);
+  const quickKeysEnabled = useRegister((s) => s.quickKeysEnabled);
+
   return (
     <main className="register">
+      {training && (
+        <div className="reg-training-banner">
+          Training mode — sales are marked as training and won’t affect inventory
+        </div>
+      )}
+      <div className="reg-cols">
       <div className="reg-col reg-qk">
         <div className="reg-label">Search for products</div>
         <div className="reg-search">
@@ -36,7 +46,16 @@ export function RegisterScreen() {
             </button>
           )}
         </div>
-        <QuickKeys query={query} />
+        {quickKeysEnabled || query ? (
+          <QuickKeys query={query} />
+        ) : (
+          <div className="qk-grid">
+            <div className="qk-empty">
+              Quick keys are turned off for this register. Search for products above, or enable
+              quick keys in Settings.
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="reg-col reg-cart-col">
@@ -64,6 +83,7 @@ export function RegisterScreen() {
           </div>
         </div>
         <RegisterCart onPay={() => !empty && setPayOpen(true)} />
+      </div>
       </div>
 
       {payOpen && <PayModal onClose={() => setPayOpen(false)} />}
