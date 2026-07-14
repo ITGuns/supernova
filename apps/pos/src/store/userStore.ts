@@ -4,6 +4,10 @@ import { dbUsers } from '../lib/db';
 
 // Single source of truth for staff/users, shared across Setup → Users,
 // Reporting → User reports, the profile drawer, and login authentication.
+
+// ── Protected accounts ───────────────────────────────────────────────────────
+// These IDs can NEVER be deleted or disabled — they are seeded admin accounts.
+const PROTECTED_USER_IDS = new Set(['u-owner', 'u-jade']);
 export interface AppUser {
   id: string;
   name: string;
@@ -108,11 +112,21 @@ export const useUsers = create<UserState>()(
       },
 
       deleteUser: (id) => {
+        // Never allow protected admin accounts to be removed.
+        if (PROTECTED_USER_IDS.has(id)) {
+          console.warn(`[userStore] Cannot delete protected account: ${id}`);
+          return;
+        }
         set((s) => ({ users: s.users.filter((x) => x.id !== id) }));
         dbUsers.del(id);
       },
 
       toggleUser: (id) => {
+        // Never allow protected admin accounts to be disabled.
+        if (PROTECTED_USER_IDS.has(id)) {
+          console.warn(`[userStore] Cannot disable protected account: ${id}`);
+          return;
+        }
         const updated = get().users.map((x) => (x.id === id ? { ...x, enabled: !x.enabled } : x));
         set({ users: updated });
         const u = updated.find((x) => x.id === id);
