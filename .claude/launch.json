@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "pos",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@nova/pos", "dev"],
+      "port": 5173
+    }
+  ]
+}
