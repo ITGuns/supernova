@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { dbRegisterConfig } from '../lib/db';
 
 // Per-register settings (training mode, quick keys and their layouts).
 // Drives the Sell register screen and the register Settings page.
@@ -14,6 +15,8 @@ interface RegisterState {
   layouts: QuickKeyLayout[];
   currentLayoutId: string;
 
+  /** Sync trainingMode from Supabase. */
+  syncFromDb: () => Promise<void>;
   toggleTraining: () => void;
   toggleQuickKeys: () => void;
   addLayout: () => void;
@@ -30,13 +33,24 @@ const uid = (): string =>
 
 export const useRegister = create<RegisterState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       trainingMode: false,
       quickKeysEnabled: true,
       layouts: [{ id: 'default', name: 'Default layout' }],
       currentLayoutId: 'default',
 
-      toggleTraining: () => set((s) => ({ trainingMode: !s.trainingMode })),
+      syncFromDb: async () => {
+        const row = await dbRegisterConfig.get();
+        if (!row) return;
+        set({ trainingMode: row.training_mode ?? false });
+      },
+
+      toggleTraining: () => {
+        const trainingMode = !get().trainingMode;
+        set({ trainingMode });
+        dbRegisterConfig.save({ training_mode: trainingMode });
+      },
+
       toggleQuickKeys: () => set((s) => ({ quickKeysEnabled: !s.quickKeysEnabled })),
 
       addLayout: () =>
@@ -64,7 +78,6 @@ export const useRegister = create<RegisterState>()(
           if (!first) return s;
           return {
             layouts,
-            // If the current layout was deleted, fall back to the first remaining one.
             currentLayoutId: s.currentLayoutId === id ? first.id : s.currentLayoutId,
           };
         }),

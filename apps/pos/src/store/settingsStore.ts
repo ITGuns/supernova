@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { dbSettings } from '../lib/db';
 
 // Store-wide settings that actually drive the app (checkout tax, store name, etc.).
 export interface TaxOption {
@@ -20,6 +21,8 @@ interface SettingsState {
   defaultTaxLabel: string;
   defaultTaxRateBps: number;
   taxes: TaxOption[];
+  /** Pull latest values from Supabase and merge into local state. */
+  syncFromDb: () => Promise<void>;
   setStoreName: (n: string) => void;
   setDefaultTax: (label: string) => void;
   addTax: (label: string, rateBps: number) => void;
@@ -39,34 +42,71 @@ export const useSettings = create<SettingsState>()(
       defaultTaxLabel: 'No Tax (0%)',
       defaultTaxRateBps: 0,
       taxes: TAX_OPTIONS,
-      setStoreName: (storeName) => set({ storeName }),
+
+      syncFromDb: async () => {
+        const row = await dbSettings.get();
+        if (!row) return;
+        set({
+          storeName: row.store_name ?? get().storeName,
+          defaultTaxLabel: row.default_tax_label ?? get().defaultTaxLabel,
+          defaultTaxRateBps: row.default_tax_rate_bps ?? get().defaultTaxRateBps,
+          taxes: Array.isArray(row.taxes) && row.taxes.length ? row.taxes : get().taxes,
+        });
+      },
+
+      setStoreName: (storeName) => {
+        set({ storeName });
+        dbSettings.save({ store_name: storeName });
+      },
+
       setDefaultTax: (label) => {
         const opt = get().taxes.find((o) => o.label === label);
-        set({ defaultTaxLabel: label, defaultTaxRateBps: opt ? opt.rateBps : 0 });
+        const defaultTaxRateBps = opt ? opt.rateBps : 0;
+        set({ defaultTaxLabel: label, defaultTaxRateBps });
+        dbSettings.save({ default_tax_label: label, default_tax_rate_bps: defaultTaxRateBps });
       },
-      addTax: (label, rateBps) =>
-        set((s) => ({ taxes: [...s.taxes, { id: uid(), label, rateBps }] })),
-      updateTax: (id, patch) =>
-        set((s) => {
-          const taxes = s.taxes.map((t) => (t.id === id ? { ...t, ...patch } : t));
-          // Keep the checkout default in sync if the edited tax is the default.
-          const edited = taxes.find((t) => t.id === id);
-          const wasDefault = s.taxes.find((t) => t.id === id)?.label === s.defaultTaxLabel;
-          return wasDefault && edited
-            ? { taxes, defaultTaxLabel: edited.label, defaultTaxRateBps: edited.rateBps }
-            : { taxes };
-        }),
-      deleteTax: (id) =>
-        set((s) => {
-          const removed = s.taxes.find((t) => t.id === id);
-          const taxes = s.taxes.filter((t) => t.id !== id);
-          const patch: Partial<SettingsState> = { taxes };
-          if (removed && removed.label === s.defaultTaxLabel) {
-            patch.defaultTaxLabel = 'No Tax (0%)';
-            patch.defaultTaxRateBps = 0;
-          }
-          return patch;
-        }),
+
+      addTax: (label, rateBps) => {
+        const taxes = [...get().taxes, { id: uid(), label, rateBps }];
+        set({ taxes });
+        dbSettings.save({ taxes });
+      },
+
+      updateTax: (id, patch) => {
+        const taxes = get().taxes.map((t) => (t.id === id ? { ...t, ...patch } : t));
+        const edited = taxes.find((t) => t.id === id);
+        const wasDefault = get().taxes.find((t) => t.id === id)?.label === get().defaultTaxLabel;
+        const extra =
+          wasDefault && edited
+            ? { defaultTaxLabel: edited.label, defaultTaxRateBps: edited.rateBps }
+            : {};
+        set({ taxes, ...extra });
+        dbSettings.save({
+          taxes,
+          ...(extra.defaultTaxLabel
+            ? {
+                default_tax_label: extra.defaultTaxLabel,
+                default_tax_rate_bps: extra.defaultTaxRateBps,
+              }
+            : {}),
+        });
+      },
+
+      deleteTax: (id) => {
+        const removed = get().taxes.find((t) => t.id === id);
+        const taxes = get().taxes.filter((t) => t.id !== id);
+        const patch: Partial<SettingsState> = { taxes };
+        if (removed && removed.label === get().defaultTaxLabel) {
+          patch.defaultTaxLabel = 'No Tax (0%)';
+          patch.defaultTaxRateBps = 0;
+        }
+        set(patch);
+        dbSettings.save({
+          taxes,
+          default_tax_label: patch.defaultTaxLabel ?? get().defaultTaxLabel,
+          default_tax_rate_bps: patch.defaultTaxRateBps ?? get().defaultTaxRateBps,
+        });
+      },
     }),
     { name: 'nova-settings-v2', version: 1, migrate: (persisted: unknown) => persisted as SettingsState },
   ),

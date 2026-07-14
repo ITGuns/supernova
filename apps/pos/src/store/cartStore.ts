@@ -4,6 +4,7 @@ import type { CatalogItem, TaxGroupId } from '../data/catalog';
 import { useProducts } from './productStore';
 import { useRegister } from './registerStore';
 import { useUsers } from './userStore';
+import { dbSales, dbParked } from '../lib/db';
 
 export interface CartLine {
   lineId: string;
@@ -59,6 +60,9 @@ interface CartState {
   lastSale: CompletedSale | null;
   sales: CompletedSale[];
 
+  /** Pull sales + parked from Supabase. */
+  syncFromDb: () => Promise<void>;
+
   addItem: (item: CatalogItem) => void;
   incrementLine: (lineId: string) => void;
   decrementLine: (lineId: string) => void;
@@ -84,6 +88,51 @@ const uid = (): string =>
 
 const orderNumber = (seq: number): string => `#${1000 + seq}`;
 
+// Map a CompletedSale to the sales table row (snake_case).
+const saleToRow = (s: CompletedSale): Record<string, unknown> => ({
+  order_number: s.orderNumber,
+  lines: s.lines,
+  total_minor: s.totalMinor,
+  tenders: s.tenders,
+  change_minor: s.changeMinor,
+  sold_at: new Date(s.at).toISOString(),
+  training: s.training ?? false,
+  customer_name: s.customer ?? null,
+  note: s.note ?? null,
+  sold_by: s.soldBy ?? null,
+  status: s.status ?? 'Completed',
+});
+
+// Map a DB sales row back to CompletedSale.
+const rowToSale = (r: Record<string, unknown>): CompletedSale => ({
+  orderNumber: r.order_number as string,
+  lines: r.lines as SaleLine[],
+  totalMinor: r.total_minor as number,
+  tenders: r.tenders as Tender[],
+  changeMinor: r.change_minor as number,
+  at: new Date(r.sold_at as string).getTime(),
+  training: r.training as boolean,
+  customer: r.customer_name as string | undefined,
+  note: r.note as string | undefined,
+  soldBy: r.sold_by as string | undefined,
+  status: r.status as CompletedSale['status'],
+});
+
+// Map a ParkedSale to the parked_sales table row.
+const parkedToRow = (p: ParkedSale): Record<string, unknown> => ({
+  id: p.id,
+  label: p.label,
+  lines: p.lines,
+  parked_at: new Date(p.parkedAt).toISOString(),
+});
+
+const rowToParked = (r: Record<string, unknown>): ParkedSale => ({
+  id: r.id as string,
+  label: r.label as string,
+  lines: r.lines as CartLine[],
+  parkedAt: new Date(r.parked_at as string).getTime(),
+});
+
 export const useCart = create<CartState>()(
   persist(
     (set, get) => ({
@@ -95,6 +144,16 @@ export const useCart = create<CartState>()(
   orderNote: '',
   lastSale: null,
   sales: [],
+
+  syncFromDb: async () => {
+    const [salesRows, parkedRows] = await Promise.all([
+      dbSales.list(),
+      dbParked.list(),
+    ]);
+    const sales = salesRows.map(rowToSale);
+    const parked = parkedRows.map(rowToParked);
+    if (sales.length || parked.length) set({ sales, parked });
+  },
 
   addItem: (item) =>
     set((state) => {
@@ -148,6 +207,7 @@ export const useCart = create<CartState>()(
         lines: state.lines,
         parkedAt: Date.now(),
       };
+      dbParked.insert(parkedToRow(parkedSale));
       return {
         parked: [parkedSale, ...state.parked],
         lines: [],
@@ -160,18 +220,20 @@ export const useCart = create<CartState>()(
     set((state) => {
       const sale = state.parked.find((p) => p.id === id);
       if (!sale) return state;
+      dbParked.del(id);
       return { lines: sale.lines, parked: state.parked.filter((p) => p.id !== id) };
     }),
 
-  discardParked: (id) =>
-    set((state) => ({ parked: state.parked.filter((p) => p.id !== id) })),
+  discardParked: (id) => {
+    set((state) => ({ parked: state.parked.filter((p) => p.id !== id) }));
+    dbParked.del(id);
+  },
 
   completeSale: (sale) => {
     const state = get();
     const training = useRegister.getState().trainingMode;
 
-    // Draw down inventory: reduce each sold product's "Available to sell".
-    // Training-mode sales are practice runs and leave inventory untouched.
+    // Draw down inventory (skip training-mode runs).
     if (!training) {
       const prodStore = useProducts.getState();
       for (const line of state.lines) {
@@ -193,6 +255,10 @@ export const useCart = create<CartState>()(
       soldBy,
       status: 'Completed',
     };
+
+    // Persist to Supabase.
+    dbSales.insert(saleToRow(completed));
+
     set({
       lines: [],
       orderDiscountBps: 0,
@@ -210,7 +276,6 @@ export const useCart = create<CartState>()(
     const sale = state.sales.find((s) => s.orderNumber === orderNo);
     if (!sale || sale.status === 'Returned') return;
 
-    // Returns put stock back (unless it was a training sale).
     if (!sale.training) {
       const prodStore = useProducts.getState();
       for (const line of sale.lines) {
@@ -218,6 +283,9 @@ export const useCart = create<CartState>()(
         if (prod) prodStore.updateProduct(prod.id, { available: prod.available + line.quantity });
       }
     }
+
+    dbSales.update(orderNo, { status: 'Returned' });
+
     set({
       sales: state.sales.map((s) =>
         s.orderNumber === orderNo ? { ...s, status: 'Returned' as const } : s,
@@ -229,7 +297,6 @@ export const useCart = create<CartState>()(
     }),
     {
       name: 'nova-cart-v2',
-      // Persist completed sales history and parked sales — not the in-progress cart or receipt.
       partialize: (s) => ({ sales: s.sales, parked: s.parked, orderSeq: s.orderSeq }),
     },
   ),

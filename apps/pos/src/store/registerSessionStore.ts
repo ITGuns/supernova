@@ -1,9 +1,9 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { dbRegisterSession } from '../lib/db';
 
 // Register session lifecycle: open/close state, opening float, cash in/out
-// movements, and the closure history. Drives Open/Close, Cash management,
-// Register status and the Reporting register-closures / cash-movement reports.
+// movements, and the closure history.
 export type CashMovementType = 'ADD' | 'REMOVE';
 
 export interface CashMovement {
@@ -38,6 +38,8 @@ interface RegisterSessionState {
   movements: CashMovement[];
   closures: RegisterClosure[];
 
+  /** Pull session state from Supabase. */
+  syncFromDb: () => Promise<void>;
   openRegister: (floatMinor: number) => void;
   addMovement: (m: Omit<CashMovement, 'id' | 'at'>) => void;
   closeRegister: (data: {
@@ -56,7 +58,7 @@ const uid = (): string =>
 
 export const useRegisterSession = create<RegisterSessionState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       // Registers start open so a fresh account can sell immediately.
       status: 'open',
       openedAt: null,
@@ -65,42 +67,76 @@ export const useRegisterSession = create<RegisterSessionState>()(
       movements: [],
       closures: [],
 
-      openRegister: (floatMinor) =>
+      syncFromDb: async () => {
+        const row = await dbRegisterSession.get();
+        if (!row) return;
         set({
-          status: 'open',
+          status: row.status ?? 'open',
+          openedAt: row.opened_at ? new Date(row.opened_at as string).getTime() : null,
+          openingFloatMinor: row.opening_float_minor ?? 0,
+          closureSeq: row.closure_seq ?? 1,
+          movements: (row.movements as CashMovement[]) ?? [],
+          closures: (row.closures as RegisterClosure[]) ?? [],
+        });
+      },
+
+      openRegister: (floatMinor) => {
+        const next = {
+          status: 'open' as const,
           openedAt: Date.now(),
           openingFloatMinor: floatMinor,
+          movements: [] as CashMovement[],
+        };
+        set(next);
+        dbRegisterSession.save({
+          status: 'open',
+          opened_at: new Date(next.openedAt).toISOString(),
+          opening_float_minor: floatMinor,
           movements: [],
-        }),
+        });
+      },
 
-      addMovement: (m) =>
-        set((s) => ({ movements: [{ ...m, id: uid(), at: Date.now() }, ...s.movements] })),
+      addMovement: (m) => {
+        const movement: CashMovement = { ...m, id: uid(), at: Date.now() };
+        const movements = [movement, ...get().movements];
+        set({ movements });
+        dbRegisterSession.save({ movements });
+      },
 
-      closeRegister: (data) =>
-        set((s) => ({
+      closeRegister: (data) => {
+        const s = get();
+        const closure: RegisterClosure = {
+          id: uid(),
+          number: s.closureSeq,
+          openedAt: s.openedAt ?? Date.now(),
+          closedAt: Date.now(),
+          openingFloatMinor: s.openingFloatMinor,
+          countedMinor: data.countedMinor,
+          expectedMinor: data.expectedMinor,
+          varianceMinor: data.countedMinor - data.expectedMinor,
+          nextFloatMinor: data.nextFloatMinor,
+          note: data.note,
+          by: data.by,
+          movements: s.movements,
+        };
+        const closures = [closure, ...s.closures];
+        set({
           status: 'closed',
           closureSeq: s.closureSeq + 1,
-          closures: [
-            {
-              id: uid(),
-              number: s.closureSeq,
-              openedAt: s.openedAt ?? Date.now(),
-              closedAt: Date.now(),
-              openingFloatMinor: s.openingFloatMinor,
-              countedMinor: data.countedMinor,
-              expectedMinor: data.expectedMinor,
-              varianceMinor: data.countedMinor - data.expectedMinor,
-              nextFloatMinor: data.nextFloatMinor,
-              note: data.note,
-              by: data.by,
-              movements: s.movements,
-            },
-            ...s.closures,
-          ],
+          closures,
           movements: [],
           openedAt: null,
           openingFloatMinor: data.nextFloatMinor,
-        })),
+        });
+        dbRegisterSession.save({
+          status: 'closed',
+          closure_seq: s.closureSeq + 1,
+          closures,
+          movements: [],
+          opened_at: null,
+          opening_float_minor: data.nextFloatMinor,
+        });
+      },
     }),
     { name: 'nova-register-session-v1' },
   ),
