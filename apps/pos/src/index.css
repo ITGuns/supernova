@@ -3174,7 +3174,7 @@ input {
   }
 }
 @media (max-width: 820px) {
-  .register {
+  .reg-cols {
     flex-direction: column;
   }
   .reg-cart-col {
