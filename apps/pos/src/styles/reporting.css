@@ -1,0 +1,162 @@
+/* Extra styles for the wired-up Home, Reporting, Online and Finance pages.
+   Everything genuinely new lives here — index.css is untouched. */
+
+/* Register closures — real table has 8 columns (opened/closed/float/expected/counted/variance) */
+.rc-head.rc-real,
+.rc-row.rc-real {
+  grid-template-columns: 1.1fr 0.5fr 1.7fr 1.7fr 1fr 1fr 1fr 1fr;
+}
+
+/* Variance highlighting (Reporting closures + Finance) */
+.var-neg {
+  color: #dc2626;
+  font-weight: 700;
+}
+.var-pos {
+  color: #16a34a;
+  font-weight: 700;
+}
+
+/* Gift card / store credit report data rows (same grid as .gc-head) */
+.gc-row {
+  display: grid;
+  grid-template-columns: 2.4fr 1fr 1fr 1fr;
+  gap: 10px;
+  padding: 14px 16px;
+  font-size: 14px;
+  border-bottom: 1px solid var(--line);
+  align-items: center;
+}
+.gc-row:last-child {
+  border-bottom: none;
+}
+.gc-row .r {
+  text-align: right;
+}
+
+/* Cash movement rows — session / note detail line */
+.cm-note {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+  font-weight: 400;
+}
+
+/* Home — extra retail metrics row */
+.home-extra {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 18px;
+  margin-bottom: 16px;
+}
+
+/* Home — inline sales-target form */
+.target-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.target-form input {
+  height: 34px;
+  width: 130px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 14px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+/* Finance — summary cards */
+.fin-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.fin-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px 18px;
+}
+.fin-card-l {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.fin-card-v {
+  font-size: 24px;
+  font-weight: 800;
+}
+.fin-card-s {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+/* Finance — closures table */
+.finc-table {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.finc-head,
+.finc-row {
+  display: grid;
+  grid-template-columns: 0.5fr 1.7fr 1.7fr 1fr 1fr 1fr;
+  gap: 10px;
+  padding: 12px 16px;
+  align-items: center;
+  font-size: 13px;
+}
+.finc-head {
+  font-weight: 700;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+.finc-row {
+  border-bottom: 1px solid var(--line);
+}
+.finc-row:last-child {
+  border-bottom: none;
+}
+.finc-head .r,
+.finc-row .r {
+  text-align: right;
+}
+
+/* Online — store URL preview */
+.online-url {
+  font-size: 13px;
+  color: var(--muted);
+}
+.online-url b {
+  color: var(--text);
+}
+.online-urlrow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.online-urlrow input {
+  height: 40px;
+  width: 220px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  font-size: 14px;
+  background: var(--panel);
+  color: var(--text);
+}
+.online-urlrow span {
+  font-size: 14px;
+  color: var(--muted);
+}

@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useSetup } from '../store/setupStore';
 import { Switch } from './controls';
 
 export function SavedPaymentSettings() {
-  const [on, setOn] = useState(false);
+  const on = useSetup((s) => s.savedPaymentEnabled);
+  const set = useSetup((s) => s.set);
 
   return (
     <>
@@ -16,17 +17,16 @@ export function SavedPaymentSettings() {
               Allow your business to securely store customer cards and charge them for future sales.
             </div>
             <div className="set-desc" style={{ marginTop: 12 }}>
-              Once enabled, you can manage team member access under <span className="rlink">User roles</span>.
+              Once enabled, you can manage team member access under Setup → Users.
             </div>
           </div>
           <div className="set-fields">
             <div className="switch-inline">
-              <Switch on={on} onClick={() => setOn((v) => !v)} />
+              <Switch on={on} onClick={() => set({ savedPaymentEnabled: !on })} />
               <span className="switch-label">Save payment methods</span>
             </div>
             <div className="switch-desc">
-              To store customer card information securely and charge for future sales,{' '}
-              <span className="rlink">activate Nova Payments</span>.
+              Customer card information is stored securely and can be charged for future sales.
             </div>
           </div>
         </div>

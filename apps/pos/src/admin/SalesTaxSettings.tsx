@@ -1,54 +1,45 @@
 import { useState } from 'react';
+import { useSettings } from '../store/settingsStore';
 
-interface Tax {
-  name: string;
-  rate: string;
-  from: string;
-}
+// Display a basis-points rate as a percentage, e.g. 825 → "8.25%".
+const pct = (rateBps: number) => `${(rateBps / 100).toFixed(2).replace(/\.?0+$/, '')}%`;
 
 export function SalesTaxSettings() {
-  const [taxes, setTaxes] = useState<Tax[]>([
-    { name: 'Sales Tax', rate: '8.25%', from: 'Nova Retail' },
-    { name: 'Food (0%)', rate: '0%', from: 'Nova Retail' },
-    { name: 'No Tax', rate: '0%', from: 'Nova Retail' },
-  ]);
+  const taxes = useSettings((s) => s.taxes);
+  const addTax = useSettings((s) => s.addTax);
+  const updateTax = useSettings((s) => s.updateTax);
+  const deleteTax = useSettings((s) => s.deleteTax);
 
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editRate, setEditRate] = useState('');
-  const [editFrom, setEditFrom] = useState('');
 
-  const addTax = () =>
-    setTaxes((t) => [...t, { name: `Sales Tax ${t.length + 1}`, rate: '0%', from: 'Manual' }]);
+  const add = () => addTax(`Sales Tax ${taxes.length + 1}`, 0);
 
   const saveEdit = () => {
-    if (editingIndex === null) return;
-    setTaxes((prev) =>
-      prev.map((t, idx) => {
-        if (idx === editingIndex) {
-          return { name: editName, rate: editRate, from: editFrom };
-        }
-        return t;
-      })
-    );
-    setEditingIndex(null);
+    if (editingId === null) return;
+    updateTax(editingId, {
+      label: editName,
+      rateBps: Math.round((parseFloat(editRate) || 0) * 100),
+    });
+    setEditingId(null);
   };
 
-  const deleteTax = () => {
-    if (editingIndex === null) return;
-    setTaxes((prev) => prev.filter((_, idx) => idx !== editingIndex));
-    setEditingIndex(null);
+  const removeTax = () => {
+    if (editingId === null) return;
+    deleteTax(editingId);
+    setEditingId(null);
   };
 
   return (
     <>
       <div className="crumb">
-        <span className="rlink">Setup</span> <span className="crumb-sep">›</span> Sales Taxes
+        Setup <span className="crumb-sep">›</span> Sales Taxes
       </div>
       <h1 className="page-title">Sales Tax</h1>
 
       <div className="tax-addbar">
-        <button className="tax-add-btn" onClick={addTax}>
+        <button className="tax-add-btn" onClick={add}>
           Add Sales Tax
         </button>
       </div>
@@ -60,20 +51,19 @@ export function SalesTaxSettings() {
           <span>Imported From</span>
           <span style={{ textAlign: 'center' }}>Actions</span>
         </div>
-        {taxes.map((t, i) => (
-          <div key={i} className="tax-row">
-            <span className="tax-name">{t.name}</span>
-            <span className="r">{t.rate}</span>
-            <span>{t.from}</span>
+        {taxes.map((t) => (
+          <div key={t.id} className="tax-row">
+            <span className="tax-name">{t.label}</span>
+            <span className="r">{pct(t.rateBps)}</span>
+            <span>Nova Retail</span>
             <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
               <span
                 className="rlink"
                 style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }}
                 onClick={() => {
-                  setEditingIndex(i);
-                  setEditName(t.name);
-                  setEditRate(t.rate);
-                  setEditFrom(t.from);
+                  setEditingId(t.id);
+                  setEditName(t.label);
+                  setEditRate(String(t.rateBps / 100));
                 }}
               >
                 ✎ Edit
@@ -83,12 +73,12 @@ export function SalesTaxSettings() {
         ))}
       </div>
 
-      {editingIndex !== null && (
-        <div className="pm-overlay" onClick={() => setEditingIndex(null)}>
+      {editingId !== null && (
+        <div className="pm-overlay" onClick={() => setEditingId(null)}>
           <div className="pm" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '460px' }}>
             <div className="pm-head">
               <h2>Edit sales tax</h2>
-              <button className="pm-close" onClick={() => setEditingIndex(null)} aria-label="Close">
+              <button className="pm-close" onClick={() => setEditingId(null)} aria-label="Close">
                 ×
               </button>
             </div>
@@ -114,28 +104,19 @@ export function SalesTaxSettings() {
                   className="set-input"
                   value={editRate}
                   onChange={(e) => setEditRate(e.target.value)}
-                  placeholder="e.g. 8.25%, 0%"
+                  placeholder="e.g. 8.25"
+                  inputMode="decimal"
                   style={{ width: '100%', boxSizing: 'border-box' }}
                 />
-              </div>
-
-              <div className="set-field" style={{ maxWidth: '100%' }}>
-                <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                  Imported from / source
-                </label>
-                <input
-                  className="set-input"
-                  value={editFrom}
-                  onChange={(e) => setEditFrom(e.target.value)}
-                  placeholder="e.g. Nova Retail, Manual"
-                  style={{ width: '100%', boxSizing: 'border-box' }}
-                />
+                <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '6px' }}>
+                  Entered as a percentage — this rate drives the default-tax dropdown and checkout.
+                </div>
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '12px', alignItems: 'center' }}>
                 <button
                   type="button"
-                  onClick={deleteTax}
+                  onClick={removeTax}
                   style={{
                     background: 'none',
                     border: 'none',
@@ -150,7 +131,7 @@ export function SalesTaxSettings() {
                   Delete tax rate
                 </button>
                 <div style={{ display: 'flex', gap: '10px' }}>
-                  <button className="btn-s" onClick={() => setEditingIndex(null)} type="button">
+                  <button className="btn-s" onClick={() => setEditingId(null)} type="button">
                     Cancel
                   </button>
                   <button className="btn-p" onClick={saveEdit} disabled={!editName.trim()} type="button">

@@ -1,12 +1,13 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { CatalogPage } from './admin/CatalogPage';
 import { CustomersPage } from './admin/CustomersPage';
+import { FinancePage } from './admin/FinancePage';
 import { HomePage } from './admin/HomePage';
 import { InventoryPage } from './admin/InventoryPage';
+import { OnlinePage } from './admin/OnlinePage';
 import { ReportingPage } from './admin/ReportingPage';
 import { SetupPage } from './admin/SetupPage';
 import { AdminLayout } from './shell/AdminLayout';
-import { AdminPlaceholder } from './shell/AdminPlaceholder';
 import { Login } from './shell/Login';
 import { CashManagement } from './sell/CashManagement';
 import { CloseRegister } from './sell/CloseRegister';
@@ -37,12 +38,12 @@ export function App() {
       {/* Back office — light */}
       <Route element={<AdminLayout />}>
         <Route path="/home" element={<HomePage />} />
-        <Route path="/online" element={<AdminPlaceholder title="Online" />} />
+        <Route path="/online" element={<OnlinePage />} />
         <Route path="/reporting" element={<ReportingPage />} />
         <Route path="/catalog" element={<CatalogPage />} />
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/customers" element={<CustomersPage />} />
-        <Route path="/finance" element={<AdminPlaceholder title="Finance" />} />
+        <Route path="/finance" element={<FinancePage />} />
         <Route path="/setup" element={<SetupPage />} />
       </Route>
 

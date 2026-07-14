@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import type { CatalogItem, TaxGroupId } from '../data/catalog';
 import { useProducts } from './productStore';
 import { useRegister } from './registerStore';
+import { useUsers } from './userStore';
 
 export interface CartLine {
   lineId: string;
@@ -42,6 +43,10 @@ export interface CompletedSale {
   changeMinor: number;
   at: number;
   training?: boolean;
+  customer?: string;
+  note?: string;
+  soldBy?: string;
+  status?: 'Completed' | 'Returned';
 }
 
 interface CartState {
@@ -49,6 +54,8 @@ interface CartState {
   parked: ParkedSale[];
   orderSeq: number;
   orderDiscountBps: number;
+  customerName: string;
+  orderNote: string;
   lastSale: CompletedSale | null;
   sales: CompletedSale[];
 
@@ -58,12 +65,15 @@ interface CartState {
   removeLine: (lineId: string) => void;
   clear: () => void;
   toggleDiscount: () => void;
+  setCustomer: (name: string) => void;
+  setOrderNote: (note: string) => void;
 
   park: () => void;
   retrieve: (id: string) => void;
   discardParked: (id: string) => void;
 
   completeSale: (sale: Omit<CompletedSale, 'orderNumber' | 'at'>) => CompletedSale;
+  markReturned: (orderNumber: string) => void;
   dismissLastSale: () => void;
 }
 
@@ -81,6 +91,8 @@ export const useCart = create<CartState>()(
   parked: [],
   orderSeq: 1,
   orderDiscountBps: 0,
+  customerName: '',
+  orderNote: '',
   lastSale: null,
   sales: [],
 
@@ -120,9 +132,12 @@ export const useCart = create<CartState>()(
   removeLine: (lineId) =>
     set((state) => ({ lines: state.lines.filter((l) => l.lineId !== lineId) })),
 
-  clear: () => set({ lines: [], orderDiscountBps: 0 }),
+  clear: () => set({ lines: [], orderDiscountBps: 0, customerName: '', orderNote: '' }),
 
   toggleDiscount: () => set((state) => ({ orderDiscountBps: state.orderDiscountBps > 0 ? 0 : 1000 })),
+
+  setCustomer: (customerName) => set({ customerName }),
+  setOrderNote: (orderNote) => set({ orderNote }),
 
   park: () =>
     set((state) => {
@@ -165,20 +180,49 @@ export const useCart = create<CartState>()(
       }
     }
 
+    const userState = useUsers.getState();
+    const soldBy = userState.users.find((u) => u.id === userState.currentUserId)?.name ?? 'Staff';
+
     const completed: CompletedSale = {
       ...sale,
       orderNumber: orderNumber(state.orderSeq),
       at: Date.now(),
       training,
+      customer: state.customerName || undefined,
+      note: state.orderNote || undefined,
+      soldBy,
+      status: 'Completed',
     };
     set({
       lines: [],
       orderDiscountBps: 0,
+      customerName: '',
+      orderNote: '',
       orderSeq: state.orderSeq + 1,
       lastSale: completed,
       sales: [completed, ...state.sales],
     });
     return completed;
+  },
+
+  markReturned: (orderNo) => {
+    const state = get();
+    const sale = state.sales.find((s) => s.orderNumber === orderNo);
+    if (!sale || sale.status === 'Returned') return;
+
+    // Returns put stock back (unless it was a training sale).
+    if (!sale.training) {
+      const prodStore = useProducts.getState();
+      for (const line of sale.lines) {
+        const prod = prodStore.products.find((p) => p.name === line.name);
+        if (prod) prodStore.updateProduct(prod.id, { available: prod.available + line.quantity });
+      }
+    }
+    set({
+      sales: state.sales.map((s) =>
+        s.orderNumber === orderNo ? { ...s, status: 'Returned' as const } : s,
+      ),
+    });
   },
 
   dismissLastSale: () => set({ lastSale: null }),

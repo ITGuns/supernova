@@ -1,0 +1,91 @@
+/* Styles for the Catalog / Inventory / Customers admin pages that index.css doesn't cover. */
+
+/* Selectable row checkboxes */
+.acheck.sel {
+  cursor: pointer;
+  position: relative;
+}
+.acheck.sel.on {
+  background: #4b3df5;
+  border-color: #4b3df5;
+}
+.acheck.sel.on::after {
+  content: '✓';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Bulk selection action bar */
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 14px;
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+.bulk-bar .bulk-count {
+  font-weight: 600;
+  margin-right: auto;
+}
+
+/* Suppliers table without the markup column */
+.cthead.sup3,
+.ctrow.sup3 {
+  grid-template-columns: 1.5fr 1.8fr 1.2fr 1.5fr;
+}
+
+/* Adjustment reasons with a delete action */
+.athead.adj4,
+.arow.adj4 {
+  grid-template-columns: 2fr 1.5fr 0.6fr 0.5fr;
+}
+
+/* Small inline add bars (adjustment reasons, customer groups) */
+.add-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+/* Inventory counts with row actions */
+.cnt2-head.act,
+.cnt2-row.act {
+  grid-template-columns: 2.2fr 1fr 0.9fr 1.1fr;
+}
+.cnt-actions {
+  display: flex;
+  gap: 14px;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+/* Customer groups with a delete action */
+.athead.grp3,
+.arow.grp3 {
+  grid-template-columns: 2fr 1fr 0.7fr;
+}
+
+/* Stock transaction line editor in the edit modal */
+.txline-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.txline-row .txline-name {
+  flex: 1;
+  font-size: 14px;
+}
+.txline-row input {
+  width: 90px;
+}

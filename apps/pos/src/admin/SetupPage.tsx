@@ -1,6 +1,9 @@
-import { useState } from 'react';
+import { useRef, useState, type ChangeEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ContextNav, type ContextItem } from '../shell/ContextNav';
-import { TAX_OPTIONS, useSettings } from '../store/settingsStore';
+import { useSettings } from '../store/settingsStore';
+import { useSetup } from '../store/setupStore';
+import '../styles/setup.css';
 import { RadioRow } from './controls';
 import { BillingSettings } from './BillingSettings';
 import { LoyaltySettings } from './LoyaltySettings';
@@ -29,12 +32,24 @@ const NAV: ContextItem[] = [
   { key: 'saved', label: 'Saved payment methods' },
 ];
 
-const USERS = [
-  { name: 'Sam Rivera', email: 'owner@nova.local', role: 'Account owner, Admin', last: '2 minutes ago', on: true, av: '#7c3aed' },
-  { name: 'Alex Kim', email: 'alex@nova.local', role: 'Manager', last: '6 hours ago', on: true, av: '#4b3df5' },
-  { name: 'Jordan Blake', email: 'jordan@nova.local', role: 'Cashier', last: '3 days ago', on: true, av: '#e6a817' },
-  { name: 'Noa Wells', email: 'noa@nova.local', role: 'Cashier', last: 'yesterday', on: false, av: '#e0483f' },
+const CURRENCIES = [
+  'USD — United States Dollar',
+  'EUR — Euro',
+  'GBP — British Pound Sterling',
+  'CAD — Canadian Dollar',
+  'AUD — Australian Dollar',
 ];
+
+const TIME_ZONES = [
+  '(UTC-08:00) Pacific Time (US & Canada)',
+  '(UTC-07:00) Mountain Time (US & Canada)',
+  '(UTC-06:00) Central Time (US & Canada)',
+  '(UTC-05:00) Eastern Time (US & Canada)',
+  '(UTC+00:00) London',
+  '(UTC+10:00) Sydney',
+];
+
+const BARCODE_OPTIONS = ['Disabled', 'Only allow SKUs', 'Allow embedded prices', 'Allow embedded weights'];
 
 const APPS = [
   { id: 'acct', name: 'Nova Accounting', cat: 'Accounting', icon: '📊', color: '#4b3df5', desc: 'Sync sales, taxes and payouts to your books automatically.' },
@@ -58,26 +73,72 @@ function Chk({ on, onClick, label, hint }: { on: boolean; onClick: () => void; l
 }
 
 export function SetupPage() {
+  const nav = useNavigate();
   const [active, setActive] = useState('general');
-  const [genSku, setGenSku] = useState(true);
-  const [autoCust, setAutoCust] = useState(true);
-  const [combineSku, setCombineSku] = useState(true);
-  const [diffPostal, setDiffPostal] = useState(false);
   const [devTab, setDevTab] = useState<'devices' | 'label'>('label');
-  const [hideOnOrder, setHideOnOrder] = useState(true);
-  const [onAcct, setOnAcct] = useState('nolimit');
+  const setup = useSetup();
   const storeName = useSettings((s) => s.storeName);
   const setStoreName = useSettings((s) => s.setStoreName);
+  const taxes = useSettings((s) => s.taxes);
   const defaultTaxLabel = useSettings((s) => s.defaultTaxLabel);
   const setDefaultTax = useSettings((s) => s.setDefaultTax);
-  const [connectedApps, setConnectedApps] = useState<Set<string>>(new Set());
-  const toggleApp = (id: string) =>
-    setConnectedApps((s) => {
-      const n = new Set(s);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
-      return n;
+
+  // On-account: radio choice derived from the store; "limit" stays selected
+  // locally while the limit amount is still being typed.
+  const [onAcct, setOnAcct] = useState(() =>
+    !setup.onAccountEnabled ? 'no' : setup.onAccountLimit ? 'limit' : 'nolimit',
+  );
+  const pickOnAcct = (v: string) => {
+    setOnAcct(v);
+    if (v === 'no') setup.set({ onAccountEnabled: false });
+    else if (v === 'nolimit') setup.set({ onAccountEnabled: true, onAccountLimit: '' });
+    else setup.set({ onAccountEnabled: true });
+  };
+
+  // Contact information: edited as a draft, persisted on Save.
+  const [contact, setContact] = useState(() => ({
+    firstName: setup.contactFirstName,
+    lastName: setup.contactLastName,
+    email: setup.contactEmail,
+    phone: setup.contactPhone,
+    website: setup.contactWebsite,
+    twitter: setup.contactTwitter,
+    street1: setup.contactStreet1,
+    street2: setup.contactStreet2,
+    suburb: setup.contactSuburb,
+    city: setup.contactCity,
+    zip: setup.contactZip,
+    state: setup.contactState,
+    country: setup.contactCountry,
+  }));
+  const [savedFlash, setSavedFlash] = useState(false);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const c = (k: keyof typeof contact) => ({
+    value: contact[k],
+    onChange: (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+      setContact((prev) => ({ ...prev, [k]: e.target.value })),
+  });
+  const saveGeneral = () => {
+    setup.set({
+      contactFirstName: contact.firstName,
+      contactLastName: contact.lastName,
+      contactEmail: contact.email,
+      contactPhone: contact.phone,
+      contactWebsite: contact.website,
+      contactTwitter: contact.twitter,
+      contactStreet1: contact.street1,
+      contactStreet2: contact.street2,
+      contactSuburb: contact.suburb,
+      contactCity: contact.city,
+      contactZip: contact.zip,
+      contactState: contact.state,
+      contactCountry: contact.country,
     });
+    setSavedFlash(true);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setSavedFlash(false), 2000);
+  };
+
   const label = NAV.find((n) => n.key === active)?.label ?? 'Setup';
 
   return (
@@ -109,11 +170,15 @@ export function SetupPage() {
                     <div className="set-two">
                       <div className="set-field">
                         <label>Default currency</label>
-                        <select className="set-select"><option>US dollar</option><option>Euro</option><option>British pound</option></select>
+                        <select className="set-select" value={setup.currency} onChange={(e) => setup.set({ currency: e.target.value })}>
+                          {CURRENCIES.map((cur) => <option key={cur}>{cur}</option>)}
+                        </select>
                       </div>
                       <div className="set-field">
                         <label>Time zone</label>
-                        <select className="set-select"><option>(GMT-07:00) America/Los_Angeles</option><option>(GMT-05:00) America/New_York</option></select>
+                        <select className="set-select" value={setup.timeZone} onChange={(e) => setup.set({ timeZone: e.target.value })}>
+                          {TIME_ZONES.map((tz) => <option key={tz}>{tz}</option>)}
+                        </select>
                       </div>
                     </div>
                   </div>
@@ -125,7 +190,7 @@ export function SetupPage() {
                     <div className="set-field">
                       <label>Default sales tax</label>
                       <select className="set-select" value={defaultTaxLabel} onChange={(e) => setDefaultTax(e.target.value)}>
-                        {TAX_OPTIONS.map((o) => <option key={o.label}>{o.label}</option>)}
+                        {taxes.map((o) => <option key={o.id}>{o.label}</option>)}
                       </select>
                     </div>
                   </div>
@@ -138,19 +203,23 @@ export function SetupPage() {
                   </div>
                   <div className="set-fields">
                     <div className="set-sub">SKU GENERATION</div>
-                    <Chk on={genSku} onClick={() => setGenSku((v) => !v)} label="Generate SKUs by number" hint="SKUs will be generated by sequence number instead of product name." />
-                    {genSku && (
+                    <Chk on={setup.genSku} onClick={() => setup.set({ genSku: !setup.genSku })} label="Generate SKUs by number" hint="SKUs will be generated by sequence number instead of product name." />
+                    {setup.genSku && (
                       <div className="set-field set-indent">
                         <label>Current sequence number</label>
-                        <input className="set-input" defaultValue="10207" />
+                        <input className="set-input" value={setup.sequenceNumber} onChange={(e) => setup.set({ sequenceNumber: e.target.value })} />
                       </div>
                     )}
-                    <div className="set-note">ⓘ We have moved label printing settings to the new “Devices and printing” page <span className="rlink">here</span>.</div>
+                    <div className="set-note">
+                      ⓘ We have moved label printing settings to the new “Devices and printing” page{' '}
+                      <span className="rlink" onClick={() => setActive('devices')}>here</span>.
+                    </div>
                     <div className="set-sub">BARCODES</div>
                     <div className="set-field">
                       <label>Embedded barcodes</label>
-                      <select className="set-select"><option>Only allow SKUs</option><option>Allow embedded prices</option><option>Allow embedded weights</option></select>
-                      <span className="rlink set-learn">Learn how to embed prices and weights ↗</span>
+                      <select className="set-select" value={setup.embeddedBarcodes} onChange={(e) => setup.set({ embeddedBarcodes: e.target.value })}>
+                        {BARCODE_OPTIONS.map((o) => <option key={o}>{o}</option>)}
+                      </select>
                     </div>
                   </div>
                 </div>
@@ -158,14 +227,14 @@ export function SetupPage() {
                 <div className="setrow">
                   <div><div className="set-h">Customer settings</div></div>
                   <div className="set-fields">
-                    <Chk on={autoCust} onClick={() => setAutoCust((v) => !v)} label="Automatically add customers from emailed receipts to the sale" />
+                    <Chk on={setup.autoCust} onClick={() => setup.set({ autoCust: !setup.autoCust })} label="Automatically add customers from emailed receipts to the sale" />
                   </div>
                 </div>
 
                 <div className="setrow">
                   <div><div className="set-h">Web register scanning behavior</div></div>
                   <div className="set-fields">
-                    <Chk on={combineSku} onClick={() => setCombineSku((v) => !v)} label="Combine items with the same SKU" hint="In the Web register, products with the same SKU will merge into one line item. The quantity will increase as products are added or scanned." />
+                    <Chk on={setup.combineSku} onClick={() => setup.set({ combineSku: !setup.combineSku })} label="Combine items with the same SKU" hint="In the Web register, products with the same SKU will merge into one line item. The quantity will increase as products are added or scanned." />
                   </div>
                 </div>
 
@@ -177,35 +246,41 @@ export function SetupPage() {
                   <div className="set-fields">
                     <div className="set-sub">BASIC DETAILS</div>
                     <div className="set-two">
-                      <div className="set-field"><label>First name</label><input className="set-input" defaultValue="Jade" /></div>
-                      <div className="set-field"><label>Last name</label><input className="set-input" defaultValue="Savage" /></div>
+                      <div className="set-field"><label>First name</label><input className="set-input" placeholder="Enter first name" {...c('firstName')} /></div>
+                      <div className="set-field"><label>Last name</label><input className="set-input" placeholder="Enter last name" {...c('lastName')} /></div>
                     </div>
                     <div className="set-two">
-                      <div className="set-field"><label>Email</label><input className="set-input" defaultValue="jade@nova.local" /></div>
-                      <div className="set-field"><label>Phone</label><input className="set-input" defaultValue="+1 707 867 9985" /></div>
+                      <div className="set-field"><label>Email</label><input className="set-input" placeholder="Enter email address" {...c('email')} /></div>
+                      <div className="set-field"><label>Phone</label><input className="set-input" placeholder="Enter phone number" {...c('phone')} /></div>
                     </div>
                     <div className="set-two">
-                      <div className="set-field"><label>Website</label><input className="set-input" placeholder="Enter website URL" /></div>
-                      <div className="set-field"><label>Twitter</label><input className="set-input" placeholder="Enter Twitter URL" /></div>
+                      <div className="set-field"><label>Website</label><input className="set-input" placeholder="Enter website URL" {...c('website')} /></div>
+                      <div className="set-field"><label>Twitter</label><input className="set-input" placeholder="Enter Twitter URL" {...c('twitter')} /></div>
                     </div>
                     <div className="set-sub">PHYSICAL ADDRESS</div>
                     <div className="set-two">
-                      <div className="set-field"><label>Street address</label><input className="set-input" placeholder="Enter street address line 1" /></div>
-                      <div className="set-field"><label>Street address</label><input className="set-input" placeholder="Enter street address line 2" /></div>
+                      <div className="set-field"><label>Street address</label><input className="set-input" placeholder="Enter street address line 1" {...c('street1')} /></div>
+                      <div className="set-field"><label>Street address</label><input className="set-input" placeholder="Enter street address line 2" {...c('street2')} /></div>
                     </div>
                     <div className="set-two">
-                      <div className="set-field"><label>Suburb</label><input className="set-input" placeholder="Enter suburb" /></div>
-                      <div className="set-field"><label>City</label><input className="set-input" placeholder="Enter city" /></div>
+                      <div className="set-field"><label>Suburb</label><input className="set-input" placeholder="Enter suburb" {...c('suburb')} /></div>
+                      <div className="set-field"><label>City</label><input className="set-input" placeholder="Enter city" {...c('city')} /></div>
                     </div>
                     <div className="set-two">
-                      <div className="set-field"><label>ZIP code</label><input className="set-input" placeholder="Enter ZIP code" /></div>
-                      <div className="set-field"><label>State</label><input className="set-input" placeholder="Enter state" /></div>
+                      <div className="set-field"><label>ZIP code</label><input className="set-input" placeholder="Enter ZIP code" {...c('zip')} /></div>
+                      <div className="set-field"><label>State</label><input className="set-input" placeholder="Enter state" {...c('state')} /></div>
                     </div>
                     <div className="set-field">
                       <label>Country</label>
-                      <select className="set-select"><option>United States</option><option>Canada</option><option>United Kingdom</option></select>
+                      <select className="set-select" {...c('country')}>
+                        <option>United States</option><option>Canada</option><option>United Kingdom</option><option>Australia</option>
+                      </select>
                     </div>
-                    <Chk on={diffPostal} onClick={() => setDiffPostal((v) => !v)} label="Use different address for postal address" />
+                    <Chk on={setup.diffPostal} onClick={() => setup.set({ diffPostal: !setup.diffPostal })} label="Use different address for postal address" />
+                    <div className="save-row">
+                      <button className="btn-p" onClick={saveGeneral}>Save</button>
+                      {savedFlash && <span className="saved-flash">✓ Saved</span>}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -218,14 +293,14 @@ export function SetupPage() {
               <div className="page-subbar">Discover and manage apps and integrations for your store.</div>
               <div className="apps-grid">
                 {APPS.map((a) => {
-                  const on = connectedApps.has(a.id);
+                  const on = setup.connectedApps.includes(a.id);
                   return (
                     <div key={a.id} className="app-card">
                       <div className="app-icon" style={{ background: a.color }}>{a.icon}</div>
                       <div className="app-name">{a.name}</div>
                       <div className="app-cat">{a.cat}</div>
                       <div className="app-desc">{a.desc}</div>
-                      <button className={`app-btn ${on ? 'btn-s' : 'btn-p'}`} onClick={() => toggleApp(a.id)}>
+                      <button className={`app-btn ${on ? 'btn-s' : 'btn-p'}`} onClick={() => setup.toggleApp(a.id)}>
                         {on ? '✓ Connected' : 'Connect'}
                       </button>
                     </div>
@@ -248,14 +323,14 @@ export function SetupPage() {
                   <div className="set-fields">
                     <div className="oa-group-label">Allow on-account balance</div>
                     <div className="oa-radios">
-                      <RadioRow value="no" current={onAcct} onSelect={setOnAcct} label="No" />
-                      <RadioRow value="nolimit" current={onAcct} onSelect={setOnAcct} label="Yes, with no balance limit" />
-                      <RadioRow value="limit" current={onAcct} onSelect={setOnAcct} label="Yes, but with a balance limit" />
+                      <RadioRow value="no" current={onAcct} onSelect={pickOnAcct} label="No" />
+                      <RadioRow value="nolimit" current={onAcct} onSelect={pickOnAcct} label="Yes, with no balance limit" />
+                      <RadioRow value="limit" current={onAcct} onSelect={pickOnAcct} label="Yes, but with a balance limit" />
                     </div>
                     {onAcct === 'limit' && (
                       <div className="set-field oa-limit">
                         <label>Default balance limit ($)</label>
-                        <input className="set-input" placeholder="0.00" />
+                        <input className="set-input" placeholder="0.00" value={setup.onAccountLimit} onChange={(e) => setup.set({ onAccountLimit: e.target.value })} />
                       </div>
                     )}
                   </div>
@@ -276,8 +351,8 @@ export function SetupPage() {
                   </div>
                   <div className="set-fields">
                     <Chk
-                      on={hideOnOrder}
-                      onClick={() => setHideOnOrder((v) => !v)}
+                      on={setup.hideOnOrder}
+                      onClick={() => setup.set({ hideOnOrder: !setup.hideOnOrder })}
                       label="Hide products on order from Add from Recommendations"
                       hint="Add from recommendations on purchase orders will filter out products that are on order."
                     />
@@ -354,8 +429,8 @@ export function SetupPage() {
                       <div className="set-fields">
                         <div className="dev-hub">
                           <div className="dev-hub-title">Nova Hub is not connected</div>
-                          <div className="dev-line muted">Download and install Nova Hub on this computer to detect and manage connected hardware.</div>
-                          <button className="btn-p">Download Nova Hub</button>
+                          <div className="dev-line muted">Nova Hub isn’t available in this demo — hardware and register status are shown on the register status page.</div>
+                          <button className="btn-p" onClick={() => nav('/sell/status')}>Open register status</button>
                         </div>
                       </div>
                     </div>

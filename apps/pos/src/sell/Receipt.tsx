@@ -31,7 +31,7 @@ export function Receipt() {
           )}
         </div>
         <div className="rcpt-actions">
-          <button className="rcpt-ghost" onClick={dismiss}>
+          <button className="rcpt-ghost" onClick={() => window.print()}>
             Print / Email
           </button>
           <button className="pm-complete rcpt-new" onClick={dismiss}>

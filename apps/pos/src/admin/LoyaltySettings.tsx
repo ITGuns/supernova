@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSetup } from '../store/setupStore';
 
 function Chk({ on }: { on: boolean }) {
   return (
@@ -9,29 +10,35 @@ function Chk({ on }: { on: boolean }) {
 }
 
 export function LoyaltySettings() {
-  const [enabled, setEnabled] = useState(true);
-  const [pct, setPct] = useState('2.00');
-  const [redemptionMin, setRedemptionMin] = useState(false);
-  const [signupBonus, setSignupBonus] = useState(false);
-  const [welcomeEmail, setWelcomeEmail] = useState(false);
-  const [expiry, setExpiry] = useState<'none' | 'last'>('none');
+  const enabled = useSetup((s) => s.loyaltyEnabled);
+  const pct = useSetup((s) => s.loyaltyPct);
+  const redemptionMin = useSetup((s) => s.loyaltyRedemptionMin);
+  const signupBonus = useSetup((s) => s.loyaltySignupBonus);
+  const welcomeEmail = useSetup((s) => s.loyaltyWelcomeEmail);
+  const expiry = useSetup((s) => s.loyaltyExpiry);
+  const set = useSetup((s) => s.set);
 
-  const earn = (parseFloat(pct) || 0).toFixed(2);
+  // The percent field keeps free-form text while typing; the parsed value persists.
+  const [pctText, setPctText] = useState(pct.toFixed(2));
+  const onPct = (v: string) => {
+    setPctText(v);
+    set({ loyaltyPct: parseFloat(v) || 0 });
+  };
+
+  const earn = pct.toFixed(2);
 
   if (!enabled) {
     return (
       <>
         <h1 className="page-title">Loyalty</h1>
-        <div className="page-subbar">
-          Manage settings for your Retail POS Loyalty program. <span className="rlink">Need help? ↗</span>
-        </div>
+        <div className="page-subbar">Manage settings for your Retail POS Loyalty program.</div>
         <div className="placeholder-card">
           <div className="placeholder-icon">🎁</div>
           <div className="placeholder-title">Loyalty is disabled</div>
           <div className="placeholder-hint">
             Turn on Loyalty to reward customers for every purchase, in-store and online.
           </div>
-          <button className="btn-p" style={{ marginTop: 16 }} onClick={() => setEnabled(true)}>
+          <button className="btn-p" style={{ marginTop: 16 }} onClick={() => set({ loyaltyEnabled: true })}>
             Enable Loyalty
           </button>
         </div>
@@ -42,9 +49,7 @@ export function LoyaltySettings() {
   return (
     <>
       <h1 className="page-title">Loyalty</h1>
-      <div className="page-subbar">
-        Manage settings for your Retail POS Loyalty program. <span className="rlink">Need help? ↗</span>
-      </div>
+      <div className="page-subbar">Manage settings for your Retail POS Loyalty program.</div>
 
       <div className="setwrap">
         <div className="setrow">
@@ -59,7 +64,7 @@ export function LoyaltySettings() {
             <div className="set-field">
               <label>Loyalty earned per sale</label>
               <div className="pct-field">
-                <input value={pct} onChange={(e) => setPct(e.target.value)} inputMode="decimal" />
+                <input value={pctText} onChange={(e) => onPct(e.target.value)} inputMode="decimal" />
                 <span className="pct-suffix">%</span>
               </div>
               <div className="set-help">
@@ -75,7 +80,7 @@ export function LoyaltySettings() {
             <div className="set-desc">Set the requirements to redeem Loyalty.</div>
           </div>
           <div className="set-fields">
-            <div className="chk-row" onClick={() => setRedemptionMin((v) => !v)}>
+            <div className="chk-row" onClick={() => set({ loyaltyRedemptionMin: !redemptionMin })}>
               <Chk on={redemptionMin} />
               <div>
                 <div className="chk-label">Set redemption minimum</div>
@@ -95,24 +100,24 @@ export function LoyaltySettings() {
             </div>
           </div>
           <div className="set-fields">
-            <div className="chk-row" onClick={() => setSignupBonus((v) => !v)}>
+            <div className="chk-row" onClick={() => set({ loyaltySignupBonus: !signupBonus })}>
               <Chk on={signupBonus} />
               <div>
                 <div className="chk-label">Set sign-up bonus</div>
                 <div className="chk-desc">
-                  Customers will receive a Loyalty bonus once they confirm their details in the{' '}
-                  <span className="rlink">Loyalty sign-up form</span>. New customers can access the form
-                  in a welcome email, and guest customers via a link or QR code on the sale receipt.
+                  Customers will receive a Loyalty bonus once they confirm their details in the Loyalty
+                  sign-up form. New customers can access the form in a welcome email, and guest customers
+                  via a link or QR code on the sale receipt.
                 </div>
               </div>
             </div>
-            <div className="chk-row" onClick={() => setWelcomeEmail((v) => !v)}>
+            <div className="chk-row" onClick={() => set({ loyaltyWelcomeEmail: !welcomeEmail })}>
               <Chk on={welcomeEmail} />
               <div>
                 <div className="chk-label">Send welcome email</div>
                 <div className="chk-desc">
-                  A welcome email with a <span className="rlink">Loyalty sign-up form</span> will be sent
-                  to new customers. Once customers fill out the form, they will receive a sign-up bonus.
+                  A welcome email with a Loyalty sign-up form will be sent to new customers. Once
+                  customers fill out the form, they will receive a sign-up bonus.
                 </div>
               </div>
             </div>
@@ -123,24 +128,23 @@ export function LoyaltySettings() {
           <div>
             <div className="set-h">Expiry</div>
             <div className="set-desc">
-              Set an expiry policy to reward loyal customers and maintain your liability.{' '}
-              <span className="rlink">Examine liability</span> of customer Loyalty balances to choose a
-              policy that suits your needs. Ensure your Loyalty expiry policy complies with relevant local
-              consumer regulations.
+              Set an expiry policy to reward loyal customers and maintain your liability. Examine the
+              liability of customer Loyalty balances to choose a policy that suits your needs. Ensure your
+              Loyalty expiry policy complies with relevant local consumer regulations.
             </div>
           </div>
           <div className="set-fields">
             <div className="set-choices">
               <div
-                className={`set-choice ${expiry === 'none' ? 'active' : ''}`}
-                onClick={() => setExpiry('none')}
+                className={`set-choice ${expiry !== 'Last purchase' ? 'active' : ''}`}
+                onClick={() => set({ loyaltyExpiry: 'Never' })}
               >
                 <b>No expiry</b>
                 <div>Customer Loyalty balances do not expire.</div>
               </div>
               <div
-                className={`set-choice ${expiry === 'last' ? 'active' : ''}`}
-                onClick={() => setExpiry('last')}
+                className={`set-choice ${expiry === 'Last purchase' ? 'active' : ''}`}
+                onClick={() => set({ loyaltyExpiry: 'Last purchase' })}
               >
                 <b>Expiry based on last purchase date</b>
                 <div>
@@ -154,7 +158,7 @@ export function LoyaltySettings() {
       </div>
 
       <div className="loyalty-disable">
-        <span className="bill-cancel" onClick={() => setEnabled(false)}>
+        <span className="bill-cancel" onClick={() => set({ loyaltyEnabled: false })}>
           Disable Loyalty
         </span>
       </div>

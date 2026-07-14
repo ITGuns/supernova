@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { type CustomerRow } from '../data/customers';
 import { fmt } from '../lib/format';
 import { ContextNav, type ContextItem } from '../shell/ContextNav';
+import { useCustomers } from '../store/customerStore';
+import '../styles/catalog.css';
 
 const NAV: ContextItem[] = [
   { key: 'customers', label: 'Customers' },
@@ -11,14 +13,78 @@ const NAV: ContextItem[] = [
 
 const DETAIL_TABS = ['Details', 'Store credit', 'Loyalty', 'Account', 'Notes'];
 
+/** Minimal CSV parser: handles quoted fields, escaped quotes and CR/LF rows. */
+function parseCsv(text: string): string[][] {
+  const out: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQ) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQ = false;
+        }
+      } else {
+        field += ch;
+      }
+    } else if (ch === '"') {
+      inQ = true;
+    } else if (ch === ',') {
+      row.push(field);
+      field = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      row.push(field);
+      field = '';
+      if (row.some((c) => c.trim() !== '')) out.push(row);
+      row = [];
+    } else {
+      field += ch;
+    }
+  }
+  row.push(field);
+  if (row.some((c) => c.trim() !== '')) out.push(row);
+  return out;
+}
+
+/** Build a CSV string and trigger a browser download. */
+function downloadCsv(filename: string, rows: string[][]) {
+  const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  const csv = rows.map((r) => r.map(esc).join(',')).join('\n');
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export function CustomersPage() {
   const navigate = useNavigate();
   const [active, setActive] = useState('customers');
-  const [list, setList] = useState<CustomerRow[]>([]);
+  const customers = useCustomers((s) => s.customers);
+  const groups = useCustomers((s) => s.groups);
+  const addCust = useCustomers((s) => s.addCustomer);
+  const updateCust = useCustomers((s) => s.updateCustomer);
+  const deleteCust = useCustomers((s) => s.deleteCustomer);
+  const addGroup = useCustomers((s) => s.addGroup);
+  const deleteGroup = useCustomers((s) => s.deleteGroup);
+
   const [expanded, setExpanded] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState('Details');
   const [q, setQ] = useState('');
+  const [groupFilter, setGroupFilter] = useState('all');
+  const [notice, setNotice] = useState<string | null>(null);
+  const [newGroup, setNewGroup] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const importFileRef = useRef<HTMLInputElement>(null);
 
+  // Edit / create customer modal — editingCustId is 'new' while creating.
   const [editingCustId, setEditingCustId] = useState<string | null>(null);
   const [editFirst, setEditFirst] = useState('');
   const [editLast, setEditLast] = useState('');
@@ -26,6 +92,7 @@ export function CustomersPage() {
   const [editGroup, setEditGroup] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editPhone, setEditPhone] = useState('');
+  const isNewCust = editingCustId === 'new';
 
   const startEdit = (c: CustomerRow) => {
     setEditingCustId(c.id);
@@ -37,24 +104,40 @@ export function CustomersPage() {
     setEditPhone(c.phone || '');
   };
 
+  const startAdd = () => {
+    setEditingCustId('new');
+    setEditFirst('');
+    setEditLast('');
+    setEditCode('');
+    setEditGroup(groups[0] ?? 'All Customers');
+    setEditEmail('');
+    setEditPhone('');
+  };
+
   const saveCustEdit = () => {
     if (!editingCustId) return;
-    setList((prev) =>
-      prev.map((c) => {
-        if (c.id === editingCustId) {
-          return {
-            ...c,
-            firstName: editFirst,
-            lastName: editLast,
-            code: editCode,
-            group: editGroup,
-            email: editEmail,
-            phone: editPhone,
-          };
-        }
-        return c;
-      })
-    );
+    if (isNewCust) {
+      addCust({
+        firstName: editFirst.trim(),
+        lastName: editLast.trim(),
+        code: editCode.trim() || `${editFirst.trim().toLowerCase() || 'cust'}-${String(Date.now()).slice(-4)}`,
+        group: editGroup || groups[0] || 'All Customers',
+        email: editEmail.trim(),
+        phone: editPhone.trim(),
+        storeCreditMinor: 0,
+        loyaltyMinor: 0,
+        accountMinor: 0,
+      });
+    } else {
+      updateCust(editingCustId, {
+        firstName: editFirst,
+        lastName: editLast,
+        code: editCode,
+        group: editGroup,
+        email: editEmail,
+        phone: editPhone,
+      });
+    }
     setEditingCustId(null);
   };
 
@@ -164,35 +247,86 @@ export function CustomersPage() {
     printWindow.document.close();
   };
 
-  const filtered = list.filter(
+  const filtered = customers.filter(
     (c) =>
-      q.trim() === '' ||
-      `${c.firstName} ${c.lastName}`.toLowerCase().includes(q.toLowerCase()) ||
-      c.code.toLowerCase().includes(q.toLowerCase()),
+      (q.trim() === '' ||
+        `${c.firstName} ${c.lastName}`.toLowerCase().includes(q.toLowerCase()) ||
+        c.code.toLowerCase().includes(q.toLowerCase()) ||
+        (c.email || '').toLowerCase().includes(q.toLowerCase()) ||
+        (c.phone || '').toLowerCase().includes(q.toLowerCase())) &&
+      (groupFilter === 'all' || c.group === groupFilter),
   );
 
-  const addCustomer = () => {
-    const n = list.length + 1;
-    setList((l) => [
-      ...l,
-      {
-        id: `c${l.length}-${n}`,
-        firstName: 'New',
-        lastName: `Customer ${n}`,
-        code: `new-${n}`,
-        group: 'All Customers',
-        email: `new${n}@example.com`,
-        phone: '+1 555 0000',
-        storeCreditMinor: 0,
-        loyaltyMinor: 0,
-        accountMinor: 0,
-      },
+  const deleteCustomer = (id: string) => {
+    deleteCust(id);
+    setSelectedIds((prev) => prev.filter((x) => x !== id));
+    setExpanded(null);
+  };
+
+  const toggleSelect = (id: string) =>
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const allSelected = filtered.length > 0 && filtered.every((c) => selectedIds.includes(c.id));
+  const toggleSelectAll = () => setSelectedIds(allSelected ? [] : filtered.map((c) => c.id));
+  const bulkDelete = () => {
+    selectedIds.forEach((id) => deleteCust(id));
+    setSelectedIds([]);
+    setExpanded(null);
+  };
+
+  const exportCustomers = () => {
+    downloadCsv('customers.csv', [
+      ['firstName', 'lastName', 'code', 'group', 'email', 'phone', 'storeCredit', 'loyalty', 'account'],
+      ...filtered.map((c) => [
+        c.firstName,
+        c.lastName,
+        c.code,
+        c.group,
+        c.email || '',
+        c.phone || '',
+        (c.storeCreditMinor / 100).toFixed(2),
+        (c.loyaltyMinor / 100).toFixed(2),
+        (c.accountMinor / 100).toFixed(2),
+      ]),
     ]);
   };
 
-  const deleteCustomer = (id: string) => {
-    setList((l) => l.filter((c) => c.id !== id));
-    setExpanded(null);
+  const handleImportFile = (file: File | undefined) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = typeof reader.result === 'string' ? reader.result : '';
+      const parsed = parseCsv(text);
+      let count = 0;
+      if (parsed.length > 1) {
+        const header = (parsed[0] ?? []).map((h) => h.trim().toLowerCase());
+        const col = (...names: string[]) => header.findIndex((h) => names.includes(h));
+        const iFirst = col('firstname', 'first name', 'first_name', 'first');
+        const iLast = col('lastname', 'last name', 'last_name', 'last');
+        const iEmail = col('email', 'email address', 'email_address');
+        const iPhone = col('phone', 'phone number', 'phone_number', 'mobile');
+        const iGroup = col('group', 'customer group');
+        parsed.slice(1).forEach((r, idx) => {
+          const firstName = iFirst >= 0 ? (r[iFirst] ?? '').trim() : '';
+          const lastName = iLast >= 0 ? (r[iLast] ?? '').trim() : '';
+          if (!firstName && !lastName) return; // skip invalid rows
+          const rawGroup = iGroup >= 0 ? (r[iGroup] ?? '').trim() : '';
+          addCust({
+            firstName,
+            lastName,
+            code: `${(firstName || lastName).toLowerCase()}-${String(Date.now() + idx).slice(-4)}`,
+            group: groups.includes(rawGroup) ? rawGroup : 'All Customers',
+            email: iEmail >= 0 ? (r[iEmail] ?? '').trim() : '',
+            phone: iPhone >= 0 ? (r[iPhone] ?? '').trim() : '',
+            storeCreditMinor: 0,
+            loyaltyMinor: 0,
+            accountMinor: 0,
+          });
+          count++;
+        });
+      }
+      setNotice(`Imported ${count} customer${count === 1 ? '' : 's'}`);
+    };
+    reader.readAsText(file);
   };
 
   return (
@@ -203,15 +337,42 @@ export function CustomersPage() {
           {active === 'groups' ? (
             <>
               <h1 className="page-title">Groups</h1>
+              <div className="add-bar">
+                <input
+                  className="set-input"
+                  value={newGroup}
+                  onChange={(e) => setNewGroup(e.target.value)}
+                  placeholder="New group name"
+                  style={{ flex: 1 }}
+                />
+                <button
+                  className="btn-p"
+                  disabled={!newGroup.trim()}
+                  onClick={() => {
+                    addGroup(newGroup.trim());
+                    setNewGroup('');
+                  }}
+                >
+                  Add group
+                </button>
+              </div>
               <div className="atable">
-                <div className="athead grp">
+                <div className="athead grp3">
                   <span>Name</span>
                   <span className="r">Number of customers</span>
+                  <span />
                 </div>
-                {['All Customers', 'VIP', 'Wholesale'].map((g) => (
-                  <div key={g} className="arow grp">
+                {groups.map((g) => (
+                  <div key={g} className="arow grp3">
                     <span>{g}</span>
-                    <span className="r">{list.filter((c) => c.group === g).length}</span>
+                    <span className="r">{customers.filter((c) => c.group === g).length}</span>
+                    <span className="row-actions">
+                      {g !== 'All Customers' && (
+                        <span className="ic" style={{ cursor: 'pointer' }} onClick={() => deleteGroup(g)}>
+                          🗑
+                        </span>
+                      )}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -225,8 +386,20 @@ export function CustomersPage() {
                   spending habits. <span className="rlink">Need help? ↗</span>
                 </span>
                 <div className="page-actions">
-                  <button className="btn-s">Import customers</button>
-                  <button className="btn-p" onClick={addCustomer}>
+                  <input
+                    ref={importFileRef}
+                    type="file"
+                    accept=".csv,text/csv"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      handleImportFile(e.target.files?.[0]);
+                      e.target.value = '';
+                    }}
+                  />
+                  <button className="btn-s" onClick={() => importFileRef.current?.click()}>
+                    Import customers
+                  </button>
+                  <button className="btn-p" onClick={startAdd}>
                     Add customer
                   </button>
                 </div>
@@ -243,26 +416,49 @@ export function CustomersPage() {
                 </div>
                 <div className="f-field">
                   <label>Customer group</label>
-                  <div className="f-select">All</div>
+                  <select
+                    className="set-select"
+                    value={groupFilter}
+                    onChange={(e) => setGroupFilter(e.target.value)}
+                    style={{ height: '38px', minWidth: '180px', background: 'var(--panel)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: '8px', padding: '0 8px' }}
+                  >
+                    <option value="all">All</option>
+                    {groups.map((g) => (
+                      <option key={g} value={g}>{g}</option>
+                    ))}
+                  </select>
                 </div>
-                <span className="rlink filt-more">More filters</span>
-                <button className="btn-p f-search">Search</button>
               </div>
 
               <div className="cust-toolbar">
                 <span>
                   Showing {filtered.length} customer{filtered.length === 1 ? '' : 's'}
+                  {notice ? ` · ${notice}` : ''}
                 </span>
-                <span className="rlink">⤓ Export list</span>
+                <span className="rlink" onClick={exportCustomers}>⤓ Export list</span>
               </div>
+
+              {selectedIds.length > 0 && (
+                <div className="bulk-bar">
+                  <span className="bulk-count">
+                    {selectedIds.length} selected
+                  </span>
+                  <button className="btn-s danger" onClick={bulkDelete}>
+                    Delete
+                  </button>
+                  <span className="rlink" onClick={() => setSelectedIds([])}>
+                    Clear
+                  </span>
+                </div>
+              )}
 
               <div className="atable">
                 <div className="athead cust2">
                   <span className="c">
-                    <span className="acheck" />
+                    <span className={`acheck sel ${allSelected ? 'on' : ''}`} onClick={toggleSelectAll} />
                   </span>
                   <span>Customer</span>
-                  <span>Location</span>
+                  <span>Group</span>
                   <span className="r">Store credit</span>
                   <span className="r">Loyalty</span>
                   <span className="r">Account</span>
@@ -272,7 +468,10 @@ export function CustomersPage() {
                   <div key={c.id}>
                     <div className="arow cust2" onClick={() => setExpanded((e) => (e === c.id ? null : c.id))}>
                       <span className="c" onClick={(e) => e.stopPropagation()}>
-                        <span className="acheck" />
+                        <span
+                          className={`acheck sel ${selectedIds.includes(c.id) ? 'on' : ''}`}
+                          onClick={() => toggleSelect(c.id)}
+                        />
                       </span>
                       <span className="cust-name">
                         <span className="cust-av">
@@ -288,7 +487,7 @@ export function CustomersPage() {
                           <span className="cust-code">{c.code}</span>
                         </span>
                       </span>
-                      <span>–</span>
+                      <span>{c.group || '—'}</span>
                       <span className="r">{fmt(c.storeCreditMinor)}</span>
                       <span className="r">{fmt(c.loyaltyMinor)}</span>
                       <span className="r">{fmt(c.accountMinor)}</span>
@@ -392,7 +591,7 @@ export function CustomersPage() {
         <div className="pm-overlay" onClick={() => setEditingCustId(null)}>
           <div className="pm" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
             <div className="pm-head">
-              <h2>Edit customer profile</h2>
+              <h2>{isNewCust ? 'Add customer' : 'Edit customer profile'}</h2>
               <button className="pm-close" onClick={() => setEditingCustId(null)} aria-label="Close">
                 ×
               </button>
@@ -433,7 +632,7 @@ export function CustomersPage() {
                   className="set-input"
                   value={editCode}
                   onChange={(e) => setEditCode(e.target.value)}
-                  placeholder="e.g. vip-12"
+                  placeholder={isNewCust ? 'Leave blank to generate' : 'e.g. vip-12'}
                   style={{ width: '100%', boxSizing: 'border-box' }}
                 />
               </div>
@@ -448,9 +647,10 @@ export function CustomersPage() {
                   onChange={(e) => setEditGroup(e.target.value)}
                   style={{ width: '100%', boxSizing: 'border-box', height: '40px' }}
                 >
-                  <option value="All Customers">All Customers</option>
-                  <option value="VIP">VIP</option>
-                  <option value="Wholesale">Wholesale</option>
+                  {!groups.includes(editGroup) && editGroup && <option value={editGroup}>{editGroup}</option>}
+                  {groups.map((g) => (
+                    <option key={g} value={g}>{g}</option>
+                  ))}
                 </select>
               </div>
 
@@ -485,7 +685,7 @@ export function CustomersPage() {
                   Cancel
                 </button>
                 <button className="btn-p" onClick={saveCustEdit} disabled={!editFirst.trim() || !editLast.trim()} type="button">
-                  Save changes
+                  {isNewCust ? 'Add customer' : 'Save changes'}
                 </button>
               </div>
             </div>

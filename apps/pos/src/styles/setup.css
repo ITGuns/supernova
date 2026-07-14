@@ -1,0 +1,184 @@
+/* Additions for the Setup pages and shell wiring — base classes live in index.css. */
+
+/* "Saved" feedback flash */
+.save-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+.saved-flash {
+  color: #3fae6b;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Inline rename (outlets, registers, receipt templates) */
+.inline-rename {
+  height: 30px;
+  padding: 0 8px;
+  font-size: 13px;
+  border: 1px solid var(--primary);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  outline: none;
+}
+
+/* Top bar search dropdown */
+.topbar-search {
+  position: relative;
+}
+.tsearch-drop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+  z-index: 60;
+  overflow: hidden;
+}
+.tsearch-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+.tsearch-item:hover {
+  background: rgba(128, 128, 128, 0.12);
+}
+.tsearch-item-sku {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+.tsearch-empty {
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Top bar help popover */
+.help-wrap {
+  position: relative;
+}
+.help-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+}
+.help-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 210px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+  z-index: 60;
+  padding: 6px;
+}
+.help-pop-h {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 6px 8px 4px;
+}
+.help-pop-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.help-pop-item:hover {
+  background: rgba(128, 128, 128, 0.12);
+}
+
+/* Billing inline edit forms + cancel confirmation */
+.bill-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+  max-width: 280px;
+}
+.bill-form label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.bill-form-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.confirm-box {
+  border: 1px solid var(--line);
+  border-left: 3px solid #e0483f;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-top: 10px;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--panel);
+}
+.confirm-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Users → Activity table */
+.athead.act,
+.arow.act {
+  grid-template-columns: 0.8fr 1.6fr 1fr 1.6fr;
+}
+
+/* Login inline helpers */
+.login-hint {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(75, 61, 245, 0.07);
+  border: 1px solid rgba(75, 61, 245, 0.25);
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.45;
+}
+.login-help-wrap {
+  position: relative;
+}
+.login-help-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 280px;
+  z-index: 40;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+  padding: 12px;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.45;
+  text-align: left;
+}

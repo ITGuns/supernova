@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useSetup } from '../store/setupStore';
 import { Switch } from './controls';
 
 export function StoreCreditSettings() {
-  const [on, setOn] = useState(true);
+  const on = useSetup((s) => s.storeCreditEnabled);
+  const set = useSetup((s) => s.set);
 
   return (
     <>
@@ -14,7 +15,7 @@ export function StoreCreditSettings() {
             <div className="set-h">Enable store credit</div>
           </div>
           <div className="set-fields">
-            <Switch on={on} onClick={() => setOn((v) => !v)} />
+            <Switch on={on} onClick={() => set({ storeCreditEnabled: !on })} />
             <div className="switch-label switch-mt">Enable issuing store credit in my store.</div>
             <div className="switch-desc">
               Disabling store credit means you can’t issue or pay by store credit in Retail POS, and

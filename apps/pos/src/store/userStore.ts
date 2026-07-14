@@ -13,6 +13,10 @@ export interface AppUser {
   owner?: boolean;
   av: string;
   last: string;
+  /** Sales targets in minor units (Setup → Users → edit). */
+  targetDailyMinor?: number;
+  targetWeeklyMinor?: number;
+  targetMonthlyMinor?: number;
 }
 
 export const initials = (n: string) =>
@@ -31,12 +35,16 @@ const INIT: AppUser[] = [
 interface UserState {
   users: AppUser[];
   currentUserId: string | null;
+  /** Epoch ms when the current user clocked in, or null when clocked out. */
+  clockedInAt: number | null;
   addUser: (u: Omit<AppUser, 'id'>) => void;
   updateUser: (id: string, patch: Partial<AppUser>) => void;
   deleteUser: (id: string) => void;
   toggleUser: (id: string) => void;
   authenticate: (email: string, password: string) => AppUser | null;
   setCurrentUser: (id: string) => void;
+  clockIn: () => void;
+  clockOut: () => void;
 }
 
 export const useUsers = create<UserState>()(
@@ -44,6 +52,7 @@ export const useUsers = create<UserState>()(
     (set, get) => ({
       users: INIT,
       currentUserId: 'u-owner',
+      clockedInAt: null,
       addUser: (u) => set((s) => ({ users: [...s.users, { ...u, id: `u-${Date.now()}` }] })),
       updateUser: (id, patch) => set((s) => ({ users: s.users.map((x) => (x.id === id ? { ...x, ...patch } : x)) })),
       deleteUser: (id) => set((s) => ({ users: s.users.filter((x) => x.id !== id) })),
@@ -53,10 +62,13 @@ export const useUsers = create<UserState>()(
         return get().users.find((u) => u.enabled && u.email.toLowerCase() === e && u.password === password) ?? null;
       },
       setCurrentUser: (id) => set({ currentUserId: id }),
+      clockIn: () => set({ clockedInAt: Date.now() }),
+      clockOut: () => set({ clockedInAt: null }),
     }),
     {
       name: 'nova-users-v3',
-      partialize: (s) => ({ users: s.users }), // persist accounts, not the active session
+      // Persist accounts and the clock state, not the active session.
+      partialize: (s) => ({ users: s.users, clockedInAt: s.clockedInAt }),
     },
   ),
 );

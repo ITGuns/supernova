@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CATALOG, STORE } from '../data/catalog';
+import { CATALOG } from '../data/catalog';
+import { useCustomers } from '../store/customerStore';
 import { useProducts } from '../store/productStore';
+import { useRegisterSession } from '../store/registerSessionStore';
 import { initials, useUsers } from '../store/userStore';
 import { fmt } from '../lib/format';
 import { ContextNav, type ContextItem } from '../shell/ContextNav';
 import { useCart } from '../store/cartStore';
 import { KpiChart } from './KpiChart';
 import { Sparkline } from './Sparkline';
+import '../styles/reporting.css';
 
 const NAV: ContextItem[] = [
   { key: 'dashboard', label: 'Retail dashboard' },
@@ -22,10 +25,24 @@ const NAV: ContextItem[] = [
   { key: 'user', label: 'User reports' },
 ];
 
-const DAYS = ['Jun 29', 'Jun 30', 'Jul 1', 'Jul 2', 'Jul 3', 'Jul 4', 'Jul 5', 'Jul 6'];
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const kMoney = (v: number) => (v >= 1000 ? `${v / 1000}k` : String(v));
 const CATBYNAME = new Map(CATALOG.map((p) => [p.name, p]));
+
+const DAY_MS = 86_400_000;
+const startOfDay = (t: number): number => {
+  const d = new Date(t);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+};
+
+/** Round y-axis ticks (5 ticks incl. zero) that cover max. */
+const niceTicks = (max: number): number[] => {
+  if (max <= 0) return [0, 1, 2, 3, 4];
+  const rough = max / 4;
+  const pow = Math.pow(10, Math.floor(Math.log10(rough)));
+  const step = [1, 2, 5, 10].map((m) => m * pow).find((s) => s * 4 >= max) ?? pow * 10;
+  return [0, 1, 2, 3, 4].map((i) => Math.round(i * step * 100) / 100);
+};
 
 const fmtDate = (d: Date) => `${MON[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
 const fmtDateTime = (d: Date) => {
@@ -176,30 +193,27 @@ function DateRangeField({ value, onApply }: { value: string; onApply: (s: string
   );
 }
 
-interface Closure {
+const PAGE_SIZE = 20;
+
+interface ClosureRow {
   num: number;
-  opened: Date;
-  closed: Date | null;
-  storeCredit: number;
-  cash: number;
-  venmo: number;
-  zelle: number;
-  loyalty: number;
-  total: number | null;
+  opened: number;
+  closed: number | null;
+  openingFloat: number;
+  expected: number | null;
+  counted: number | null;
+  variance: number | null;
   open: boolean;
 }
-const CLOSURES: Closure[] = Array.from({ length: 0 }, (_, i) => {
-  const num = 319 - i;
-  const opened = new Date(2026, 6, 11 - i, 8, (i * 7) % 60);
-  const closed = new Date(2026, 6, 11 - i, 16, (i * 11) % 60);
-  const cash = ((i * 37) % 400) + 40;
-  const venmo = (i * 17) % 220;
-  const zelle = (i * 13) % 160;
-  const loyalty = (i * 7) % 45;
-  const open = i === 0;
-  return { num, opened, closed: open ? null : closed, storeCredit: 0, cash, venmo, zelle, loyalty, total: open ? null : cash + venmo + zelle + loyalty, open };
-});
-const PAGE_SIZE = 20;
+
+interface CashRow {
+  session: string;
+  type: 'ADD' | 'REMOVE';
+  amountMinor: number;
+  note: string;
+  by: string;
+  at: number;
+}
 
 
 function downloadCSV(name: string, rows: string[][]) {
@@ -215,13 +229,26 @@ function downloadCSV(name: string, rows: string[][]) {
 
 export function ReportingPage() {
   const sales = useCart((s) => s.sales);
+  const regStatus = useRegisterSession((s) => s.status);
+  const regOpenedAt = useRegisterSession((s) => s.openedAt);
+  const regOpeningFloat = useRegisterSession((s) => s.openingFloatMinor);
+  const regClosureSeq = useRegisterSession((s) => s.closureSeq);
+  const regMovements = useRegisterSession((s) => s.movements);
+  const regClosures = useRegisterSession((s) => s.closures);
+  const customers = useCustomers((s) => s.customers);
   const [active, setActive] = useState('dashboard');
 
   // Dashboard filters
   const [view, setView] = useState<'Day' | 'Week' | 'Month'>('Day');
   const [dateOffset, setDateOffset] = useState(0);
   const [outlet, setOutlet] = useState('Main Outlet');
-  const dashDate = new Date(2026, 6, 12 + dateOffset);
+  const dashDate = useMemo(() => {
+    const d = new Date();
+    if (view === 'Day') d.setDate(d.getDate() + dateOffset);
+    else if (view === 'Week') d.setDate(d.getDate() + dateOffset * 7);
+    else d.setMonth(d.getMonth() + dateOffset);
+    return d;
+  }, [view, dateOffset]);
 
   // Register closures
   const [regFilter, setRegFilter] = useState('All Registers');
@@ -270,11 +297,46 @@ export function ReportingPage() {
     }
   }, [active]);
 
-  const revenue = sales.reduce((s, x) => s + x.totalMinor, 0);
-  const count = sales.length;
-  const itemsTotal = sales.reduce((s, x) => s + x.lines.reduce((a, l) => a + l.quantity, 0), 0);
-  const avgSale = count ? Math.round(revenue / count) : 0;
-  const grossProfit = Math.round(revenue * 0.6);
+  // Dashboard KPI buckets: 8 periods (day/week/month) ending at the selected date.
+  const dash = useMemo(() => {
+    const bucketStart = (i: number): Date => {
+      const back = 7 - i;
+      if (view === 'Day') {
+        const d = new Date(dashDate);
+        d.setHours(0, 0, 0, 0);
+        d.setDate(d.getDate() - back);
+        return d;
+      }
+      if (view === 'Week') {
+        const d = new Date(dashDate);
+        d.setHours(0, 0, 0, 0);
+        d.setDate(d.getDate() - ((d.getDay() + 6) % 7) - back * 7); // Monday start
+        return d;
+      }
+      return new Date(dashDate.getFullYear(), dashDate.getMonth() - back, 1);
+    };
+    const bucketEnd = (d: Date): number => {
+      if (view === 'Day') return d.getTime() + DAY_MS;
+      if (view === 'Week') return d.getTime() + 7 * DAY_MS;
+      return new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime();
+    };
+    const starts = Array.from({ length: 8 }, (_, i) => bucketStart(i));
+    const buckets = starts.map((d) => {
+      const s0 = d.getTime();
+      const s1 = bucketEnd(d);
+      const inB = sales.filter((x) => x.at >= s0 && x.at < s1);
+      const rev = inB.reduce((a, x) => a + x.totalMinor, 0);
+      const items = inB.reduce((a, x) => a + x.lines.reduce((q, l) => q + l.quantity, 0), 0);
+      const custs = new Set(inB.map((x) => x.customer).filter(Boolean)).size;
+      return { rev, count: inB.length, items, custs };
+    });
+    const labels = starts.map((d) =>
+      view === 'Month'
+        ? `${MON[d.getMonth()]} ’${String(d.getFullYear()).slice(2)}`
+        : `${MON[d.getMonth()]} ${d.getDate()}`,
+    );
+    return { buckets, labels };
+  }, [sales, view, dashDate]);
 
   // Date range metrics for Sales Report
   const salesParsedRange = useMemo(() => parseRange(salesRange), [salesRange]);
@@ -376,21 +438,49 @@ export function ReportingPage() {
   }, [invFiltered, invProducts]);
 
   const money = (minor: number) => (minor === 0 ? '$0' : fmt(minor));
+  const bs = dash.buckets;
+  const curB = bs[bs.length - 1] ?? { rev: 0, count: 0, items: 0, custs: 0 };
+  const trim = (v: number) => String(Math.round(v * 100) / 100);
   const kpis = [
-    { label: 'Revenue', value: money(revenue), hist: [1000, 640, 1080, 520, 900, 1560, 1180], today: revenue / 100, yTicks: [0, 500, 1000, 1500], fmtY: kMoney },
-    { label: 'Sale count', value: String(count), hist: [8, 4, 9, 6, 7, 12, 11], today: count, yTicks: [0, 2, 4, 6, 8, 10, 12], fmtY: String },
-    { label: 'Customer count', value: String(count), hist: [1, 1, 1, 1, 1, 1, 1], today: count, yTicks: [0, 0.2, 0.4, 0.6, 0.8, 1], fmtY: (v: number) => String(v) },
-    { label: 'Gross profit', value: money(grossProfit), hist: [600, 380, 650, 310, 540, 940, 710], today: grossProfit / 100, yTicks: [0, 500, 1000, 1500], fmtY: kMoney },
-    { label: 'Discounted', value: '$0', hist: [0, 60, 55, 55, 22, 0, 0], today: 0, yTicks: [0, 20, 40, 60], fmtY: String },
-    { label: 'Discounted %', value: '0.00%', hist: [0, 3, 4, 4.3, 1, 0, 0], today: 0, yTicks: [0, 1, 2, 3, 4], fmtY: (v: number) => String(v) },
-    { label: 'Avg. sale value', value: money(avgSale), hist: [55, 100, 92, 120, 155, 210, 130], today: avgSale / 100, yTicks: [0, 50, 100, 150, 200], fmtY: String },
-    { label: 'Avg. items per sale', value: count ? (itemsTotal / count).toFixed(5).replace(/0+$/, '').replace(/\.$/, '') : '0', hist: [1, 2, 1.5, 2.2, 2.6, 3, 2], today: count ? itemsTotal / count : 0, yTicks: [0, 1, 2, 3], fmtY: String },
-  ];
+    { label: 'Revenue', value: money(curB.rev), series: bs.map((b) => b.rev / 100), fmtY: kMoney },
+    { label: 'Sale count', value: String(curB.count), series: bs.map((b) => b.count), fmtY: String },
+    { label: 'Customer count', value: curB.custs > 0 ? String(curB.custs) : '-', series: bs.map((b) => b.custs), fmtY: trim },
+    { label: 'Gross profit', value: money(Math.round(curB.rev * 0.6)), series: bs.map((b) => Math.round(b.rev * 0.6) / 100), fmtY: kMoney },
+    { label: 'Avg. sale value', value: money(curB.count ? Math.round(curB.rev / curB.count) : 0), series: bs.map((b) => (b.count ? b.rev / b.count / 100 : 0)), fmtY: trim },
+    { label: 'Avg. items per sale', value: curB.count ? trim(curB.items / curB.count) : '0', series: bs.map((b) => (b.count ? b.items / b.count : 0)), fmtY: trim },
+  ].map((k) => ({ ...k, yTicks: niceTicks(Math.max(...k.series)) }));
 
-  const totalPages = Math.max(1, Math.ceil(CLOSURES.length / PAGE_SIZE));
+  // Register closures: real history from the register session store, with the
+  // currently open session shown as a "Still open" row on top.
+  const closureRows = useMemo<ClosureRow[]>(() => {
+    const rows: ClosureRow[] = regClosures.map((c) => ({
+      num: c.number,
+      opened: c.openedAt,
+      closed: c.closedAt,
+      openingFloat: c.openingFloatMinor,
+      expected: c.expectedMinor,
+      counted: c.countedMinor,
+      variance: c.varianceMinor,
+      open: false,
+    }));
+    if (regStatus === 'open' && regOpenedAt !== null)
+      rows.unshift({
+        num: regClosureSeq,
+        opened: regOpenedAt,
+        closed: null,
+        openingFloat: regOpeningFloat,
+        expected: null,
+        counted: null,
+        variance: null,
+        open: true,
+      });
+    return rows;
+  }, [regClosures, regStatus, regOpenedAt, regClosureSeq, regOpeningFloat]);
+
+  const totalPages = Math.max(1, Math.ceil(closureRows.length / PAGE_SIZE));
   const curPage = Math.min(page, totalPages);
   const start = (curPage - 1) * PAGE_SIZE;
-  const pageRows = CLOSURES.slice(start, start + PAGE_SIZE);
+  const pageRows = closureRows.slice(start, start + PAGE_SIZE);
   const pageWindow = () => {
     const win: number[] = [];
     let lo = Math.max(1, curPage - 2);
@@ -401,9 +491,86 @@ export function ReportingPage() {
   };
   const exportClosures = () =>
     downloadCSV('register-closures.csv', [
-      ['Register', '#', 'Time Opened', 'Time Closed', 'Store Credit', 'Cash', 'venmo', 'Zelle', 'Loyalty', 'Total'],
-      ...CLOSURES.map((r) => ['Main Register', String(r.num), fmtDateTime(r.opened), r.open ? 'Still open' : fmtDateTime(r.closed!), r.storeCredit.toFixed(2), r.cash.toFixed(2), r.venmo.toFixed(2), r.zelle.toFixed(2), r.loyalty.toFixed(2), r.open ? '-' : r.total!.toFixed(2)]),
+      ['Register', '#', 'Time Opened', 'Time Closed', 'Opening Float', 'Expected', 'Counted', 'Variance'],
+      ...closureRows.map((r) => [
+        'Main Register',
+        String(r.num),
+        `"${fmtDateTime(new Date(r.opened))}"`,
+        r.open ? 'Still open' : `"${fmtDateTime(new Date(r.closed!))}"`,
+        (r.openingFloat / 100).toFixed(2),
+        r.expected === null ? '-' : (r.expected / 100).toFixed(2),
+        r.counted === null ? '-' : (r.counted / 100).toFixed(2),
+        r.variance === null ? '-' : (r.variance / 100).toFixed(2),
+      ]),
     ]);
+
+  // Cash movements: all closures' movements plus the current session's.
+  const cashRows = useMemo<CashRow[]>(() => {
+    const rows: CashRow[] = [];
+    for (const c of regClosures)
+      for (const m of c.movements)
+        rows.push({ session: `Closure #${c.number}`, type: m.type, amountMinor: m.amountMinor, note: m.note, by: m.by, at: m.at });
+    for (const m of regMovements)
+      rows.push({ session: 'Current session', type: m.type, amountMinor: m.amountMinor, note: m.note, by: m.by, at: m.at });
+    return rows.sort((a, b) => b.at - a.at);
+  }, [regClosures, regMovements]);
+  const cashFiltered = cashRows.filter(
+    (r) =>
+      (cashType === 'All cash movement types' ||
+        (cashType === 'Cash added' ? r.type === 'ADD' : r.type === 'REMOVE')) &&
+      (cashNote.trim() === '' || r.note.toLowerCase().includes(cashNote.trim().toLowerCase())),
+  );
+  const cashAdded = cashFiltered.filter((r) => r.type === 'ADD').reduce((a, r) => a + r.amountMinor, 0);
+  const cashRemoved = cashFiltered.filter((r) => r.type === 'REMOVE').reduce((a, r) => a + r.amountMinor, 0);
+
+  // Gift cards: sale lines whose product name contains "gift card".
+  const giftLines = useMemo(() => {
+    const rows: { order: string; at: number; qty: number; amountMinor: number }[] = [];
+    for (const s of sales)
+      for (const l of s.lines)
+        if (l.name.toLowerCase().includes('gift card'))
+          rows.push({ order: s.orderNumber, at: s.at, qty: l.quantity, amountMinor: l.unitPriceMinor * l.quantity });
+    return rows.sort((a, b) => b.at - a.at);
+  }, [sales]);
+  const gcFiltered = giftLines.filter(
+    (g) => gcQuery.trim() === '' || g.order.toLowerCase().includes(gcQuery.trim().toLowerCase()),
+  );
+  const gcSold = giftLines.reduce((a, g) => a + g.amountMinor, 0);
+  const gcCount = giftLines.reduce((a, g) => a + g.qty, 0);
+
+  // Store credit: outstanding balances held by customers.
+  const creditCustomers = customers.filter((c) => c.storeCreditMinor > 0);
+  const creditTotal = customers.reduce((a, c) => a + c.storeCreditMinor, 0);
+
+  // Top sales people: sales grouped by who rang them up.
+  const salesPeople = useMemo(() => {
+    const m = new Map<string, { rev: number; count: number; items: number }>();
+    for (const s of sales) {
+      const key = s.soldBy ?? 'Staff';
+      const cur = m.get(key) ?? { rev: 0, count: 0, items: 0 };
+      cur.rev += s.totalMinor;
+      cur.count += 1;
+      cur.items += s.lines.reduce((a, l) => a + l.quantity, 0);
+      m.set(key, cur);
+    }
+    return [...m.entries()].sort((a, b) => b[1].rev - a[1].rev);
+  }, [sales]);
+
+  // Per-product daily quantity over the last 7 days (for the Trend sparkline).
+  const trendMap = useMemo(() => {
+    const t0 = startOfDay(Date.now());
+    const m = new Map<string, number[]>();
+    for (const sale of sales) {
+      const daysAgo = Math.round((t0 - startOfDay(sale.at)) / DAY_MS);
+      if (daysAgo < 0 || daysAgo > 6) continue;
+      for (const l of sale.lines) {
+        const arr = m.get(l.name) ?? [0, 0, 0, 0, 0, 0, 0];
+        arr[6 - daysAgo] = (arr[6 - daysAgo] ?? 0) + l.quantity;
+        m.set(l.name, arr);
+      }
+    }
+    return m;
+  }, [sales]);
 
   const topMap = new Map<string, { qty: number; rev: number }>();
   for (const sale of sales)
@@ -437,26 +604,26 @@ export function ReportingPage() {
               </div>
               <div className="rc-scroll">
                 <div className="rc-table">
-                  <div className="rc-head">
+                  <div className="rc-head rc-real">
                     <span>Register</span><span className="r">#</span><span>Time Opened</span><span>Time Closed ▾</span>
-                    <span className="r">Store Credit</span><span className="r">Cash</span><span className="r">venmo</span><span className="r">Zelle</span><span className="r">Loyalty</span><span className="r">Total</span>
+                    <span className="r">Opening Float</span><span className="r">Expected</span><span className="r">Counted</span><span className="r">Variance</span>
                   </div>
                   {pageRows.map((r, i) => (
-                    <div key={r.num} className={`rc-row ${i % 2 ? 'alt' : ''}`}>
+                    <div key={`${r.num}-${r.opened}`} className={`rc-row rc-real ${i % 2 ? 'alt' : ''}`}>
                       <span className="rc-reg">Main Register</span>
                       <span className="r">{r.num}</span>
-                      <span className="rlink">{fmtDateTime(r.opened)}</span>
-                      <span className={r.open ? 'rc-open' : ''}>{r.open ? 'Still open' : fmtDateTime(r.closed!)}</span>
-                      <span className="r">{r.storeCredit.toFixed(2)}</span>
-                      <span className="r">{r.open ? '-' : r.cash.toFixed(2)}</span>
-                      <span className="r">{r.open ? '-' : r.venmo.toFixed(2)}</span>
-                      <span className="r">{r.open ? '-' : r.zelle.toFixed(2)}</span>
-                      <span className="r">{r.open ? '-' : r.loyalty.toFixed(2)}</span>
-                      <span className="r">{r.open ? '-' : r.total!.toFixed(2)}</span>
+                      <span>{fmtDateTime(new Date(r.opened))}</span>
+                      <span className={r.open ? 'rc-open' : ''}>{r.open ? 'Still open' : fmtDateTime(new Date(r.closed!))}</span>
+                      <span className="r">{fmt(r.openingFloat)}</span>
+                      <span className="r">{r.expected === null ? '-' : fmt(r.expected)}</span>
+                      <span className="r">{r.counted === null ? '-' : fmt(r.counted)}</span>
+                      <span className={`r ${r.variance === null || r.variance === 0 ? '' : r.variance < 0 ? 'var-neg' : 'var-pos'}`}>
+                        {r.variance === null ? '-' : fmt(r.variance)}
+                      </span>
                     </div>
                   ))}
-                  {CLOSURES.length === 0 && <div className="rc-empty">No register closures for this period.</div>}
-                  <div className="rc-foot">DISPLAYING {CLOSURES.length === 0 ? 0 : start + 1} TO {start + pageRows.length} OF {CLOSURES.length}.</div>
+                  {closureRows.length === 0 && <div className="rc-empty">No register closures for this period.</div>}
+                  <div className="rc-foot">DISPLAYING {closureRows.length === 0 ? 0 : start + 1} TO {start + pageRows.length} OF {closureRows.length}.</div>
                 </div>
               </div>
               <div className="rc-pager">
@@ -472,7 +639,7 @@ export function ReportingPage() {
           ) : active === 'cash' ? (
             <>
               <h1 className="page-title">Cash movement report</h1>
-              <div className="rep-band"><span className="rlink">Need help?</span></div>
+              <div className="rep-band"><span>Cash added to and removed from the register drawer, across all sessions.</span></div>
               <div className="rep-filter">
                 <div className="rep-fg">
                   <label>Type</label>
@@ -483,25 +650,60 @@ export function ReportingPage() {
                   </select>
                 </div>
                 <div className="rep-fg">
-                  <label>Date range</label>
-                  <div className="rep-daterange">📅 Jun 15, 2026 to Jul 11, 2026</div>
-                </div>
-                <div className="rep-fg">
                   <label>Cash movement note</label>
                   <input value={cashNote} onChange={(e) => setCashNote(e.target.value)} placeholder="Search cash movement notes" />
                 </div>
-                <span className="rlink rep-more">More filters</span>
-                <button className="btn-p">Search</button>
               </div>
               <div className="rep-toolbar">
-                <span className="rlink">⇄ Format results</span>
-                <span className="rlink" onClick={() => downloadCSV('cash-movement.csv', [['Type', 'Cash added', 'Cash removed', 'Amount']])}>⤓ Export report…</span>
+                <span>Showing {cashFiltered.length} movement{cashFiltered.length === 1 ? '' : 's'}</span>
+                <span
+                  className="rlink"
+                  onClick={() =>
+                    downloadCSV('cash-movement.csv', [
+                      ['Session', 'Type', 'Note', 'By', 'Time', 'Cash added', 'Cash removed', 'Amount'],
+                      ...cashFiltered.map((r) => [
+                        r.session,
+                        r.type === 'ADD' ? 'Cash added' : 'Cash removed',
+                        `"${r.note.replace(/"/g, '""')}"`,
+                        r.by,
+                        `"${fmtDateTime(new Date(r.at))}"`,
+                        r.type === 'ADD' ? (r.amountMinor / 100).toFixed(2) : '',
+                        r.type === 'REMOVE' ? (r.amountMinor / 100).toFixed(2) : '',
+                        ((r.type === 'ADD' ? 1 : -1) * (r.amountMinor / 100)).toFixed(2),
+                      ]),
+                      ['Totals', '', '', '', '', (cashAdded / 100).toFixed(2), (cashRemoved / 100).toFixed(2), ((cashAdded - cashRemoved) / 100).toFixed(2)],
+                    ])
+                  }
+                >
+                  ⤓ Export report…
+                </span>
               </div>
               <div className="cm-table">
                 <div className="cm-grouphead"><span /><span /><span /><span className="cm-total">TOTAL</span></div>
                 <div className="cm-head"><span>Type</span><span>Cash added</span><span>Cash removed</span><span>Amount</span></div>
-                <div className="cm-row totals"><span>Totals</span><span>—</span><span>—</span><span>—</span></div>
-                <div className="cm-empty">No data available for this period</div>
+                <div className="cm-row totals">
+                  <span>Totals</span>
+                  <span>{cashFiltered.length ? fmt(cashAdded) : '—'}</span>
+                  <span>{cashFiltered.length ? fmt(cashRemoved) : '—'}</span>
+                  <span>{cashFiltered.length ? fmt(cashAdded - cashRemoved) : '—'}</span>
+                </div>
+                {cashFiltered.length === 0 ? (
+                  <div className="cm-empty">No data available for this period</div>
+                ) : (
+                  cashFiltered.map((r) => (
+                    <div key={`${r.at}-${r.session}`} className="cm-row">
+                      <span>
+                        {r.type === 'ADD' ? 'Cash added' : 'Cash removed'}
+                        <span className="cm-note">
+                          {r.session} · {r.note || 'No note'} · {r.by} · {fmtDateTime(new Date(r.at))}
+                        </span>
+                      </span>
+                      <span>{r.type === 'ADD' ? fmt(r.amountMinor) : '—'}</span>
+                      <span>{r.type === 'REMOVE' ? fmt(r.amountMinor) : '—'}</span>
+                      <span>{r.type === 'ADD' ? fmt(r.amountMinor) : `-${fmt(r.amountMinor)}`}</span>
+                    </div>
+                  ))
+                )}
               </div>
             </>
           ) : active === 'gift' ? (
@@ -515,19 +717,44 @@ export function ReportingPage() {
                 <button className="btn-p" disabled={!gcQuery.trim()} onClick={() => { setGcLoading(true); setTimeout(() => setGcLoading(false), 700); }}>Apply filter</button>
               </div>
               <div className="gc-stats">
-                <div className="gc-stat"><span>Total value sold</span><b>$0.00</b></div>
-                <div className="gc-stat"><span>Total value redeemed</span><b>$0.00</b></div>
-                <div className="gc-stat"><span>Outstanding balance</span><b>$0.00</b></div>
-                <div className="gc-stat"><span>Gift cards in circulation</span><b>0</b></div>
+                <div className="gc-stat"><span>Total value sold</span><b>{fmt(gcSold)}</b></div>
+                <div className="gc-stat"><span>Total value redeemed</span><b>{fmt(0)}</b></div>
+                <div className="gc-stat"><span>Outstanding balance</span><b>{fmt(gcSold)}</b></div>
+                <div className="gc-stat"><span>Gift cards in circulation</span><b>{gcCount}</b></div>
               </div>
               <div className="rep-toolbar">
-                <span>Showing 0 gift cards</span>
-                <span className="rlink" onClick={() => downloadCSV('gift-cards.csv', [['Gift card number', 'Total sold', 'Total redeemed', 'Balance']])}>⤓ Export report</span>
+                <span>Showing {gcFiltered.length} gift card{gcFiltered.length === 1 ? '' : 's'}</span>
+                <span
+                  className="rlink"
+                  onClick={() =>
+                    downloadCSV('gift-cards.csv', [
+                      ['Gift card (sale)', 'Total sold', 'Total redeemed', 'Balance'],
+                      ...gcFiltered.map((g) => [g.order, (g.amountMinor / 100).toFixed(2), '0.00', (g.amountMinor / 100).toFixed(2)]),
+                    ])
+                  }
+                >
+                  ⤓ Export report
+                </span>
               </div>
               <div className="gc-table">
-                <div className="gc-head"><span>Gift card number</span><span className="r">Total sold</span><span className="r">Total redeemed</span><span className="r">Balance</span></div>
+                <div className="gc-head"><span>Gift card (sale)</span><span className="r">Total sold</span><span className="r">Total redeemed</span><span className="r">Balance</span></div>
                 <div className="gc-body">
-                  {gcLoading ? <div className="spinner" /> : <div className="cm-empty">No gift cards found for this period</div>}
+                  {gcLoading ? (
+                    <div className="spinner" />
+                  ) : gcFiltered.length === 0 ? (
+                    <div className="cm-empty">No gift cards found for this period</div>
+                  ) : (
+                    gcFiltered.map((g, i) => (
+                      <div key={`${g.order}-${i}`} className="gc-row">
+                        <span>
+                          {g.order} <span className="prod-sku">{fmtDateTime(new Date(g.at))}</span>
+                        </span>
+                        <span className="r">{fmt(g.amountMinor)}</span>
+                        <span className="r">{fmt(0)}</span>
+                        <span className="r">{fmt(g.amountMinor)}</span>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             </>
@@ -539,7 +766,7 @@ export function ReportingPage() {
                 <button className={`sh-tab ${invTab === 'replenishment' ? 'active' : ''}`} onClick={() => setInvTab('replenishment')}>Replenishment</button>
                 <button className={`sh-tab ${invTab === 'performance' ? 'active' : ''}`} onClick={() => setInvTab('performance')}>Performance</button>
               </div>
-              <div className="rep-band"><span>Get an overview of inventory and its performance over time. <span className="rlink">Need help?</span></span></div>
+              <div className="rep-band"><span>Get an overview of inventory and its performance over time.</span></div>
               {invTab === 'summary' ? (
                 <>
                   <div className="rep-filter">
@@ -564,11 +791,8 @@ export function ReportingPage() {
                       <label>Date range</label>
                       <div className="rep-daterange">📅 Jul 1, 2025 to Jul 31, 2025</div>
                     </div>
-                    <span className="rlink rep-more">More filters</span>
-                    <button className="btn-p">Search</button>
                   </div>
                   <div className="rep-toolbar">
-                    <span className="rlink">⇄ Format results</span>
                     <span className="rlink" onClick={() => downloadCSV('inventory-report.csv', [['Product', 'Closing inventory', 'Revenue', 'Inventory cost'], ...invMetrics.list.map((item) => [item.name, String(item.closing), fmt(item.revenue), fmt(item.cost)])])}>⤓ Export report…</span>
                   </div>
                   <div className="ir-table">
@@ -783,14 +1007,27 @@ export function ReportingPage() {
             <>
               <h1 className="page-title">Store credit report</h1>
               <div className="gc-stats sc-stats">
-                <div className="gc-stat"><span>Total value issued</span><b>$0.00</b></div>
-                <div className="gc-stat"><span>Total value redeemed</span><b>$0.00</b></div>
-                <div className="gc-stat"><span>Outstanding balance</span><b>$0.00</b></div>
-                <div className="gc-stat sc-blank" />
+                <div className="gc-stat"><span>Total value issued</span><b>{fmt(creditTotal)}</b></div>
+                <div className="gc-stat"><span>Total value redeemed</span><b>{fmt(0)}</b></div>
+                <div className="gc-stat"><span>Outstanding balance</span><b>{fmt(creditTotal)}</b></div>
+                <div className="gc-stat"><span>Customers with credit</span><b>{creditCustomers.length}</b></div>
               </div>
               <div className="gc-table">
                 <div className="gc-head sc-head"><span>Customer</span><span className="r">Total issued</span><span className="r">Total redeemed</span><span className="r">Balance</span></div>
-                <div className="sc-empty">No store credit data available</div>
+                {creditCustomers.length === 0 ? (
+                  <div className="sc-empty">No store credit data available</div>
+                ) : (
+                  creditCustomers.map((c) => (
+                    <div key={c.id} className="gc-row">
+                      <span>
+                        {c.firstName} {c.lastName} <span className="prod-sku">{c.code}</span>
+                      </span>
+                      <span className="r">{fmt(c.storeCreditMinor)}</span>
+                      <span className="r">{fmt(0)}</span>
+                      <span className="r">{fmt(c.storeCreditMinor)}</span>
+                    </div>
+                  ))
+                )}
               </div>
             </>
           ) : active === 'user' ? (
@@ -892,12 +1129,13 @@ export function ReportingPage() {
 
               <div className="kpi-grid">
                 {kpis.map((k) => {
-                  const series = [...k.hist, k.today];
-                  const prev = k.hist[k.hist.length - 1] ?? 0;
-                  const flat = k.today === prev;
-                  const pct = prev > 0 ? Math.round(((k.today - prev) / prev) * 100) : k.today > 0 ? 100 : 0;
-                  const changeText = flat ? 'No change' : `${k.today < prev ? '▼' : '▲'} ${Math.abs(pct)}%`;
-                  const cls = flat ? 'kflat' : k.today < prev ? 'kdown' : 'kup';
+                  const series = k.series;
+                  const today = series[series.length - 1] ?? 0;
+                  const prev = series[series.length - 2] ?? 0;
+                  const flat = today === prev;
+                  const pct = prev > 0 ? Math.round(((today - prev) / prev) * 100) : today > 0 ? 100 : 0;
+                  const changeText = flat ? 'No change' : `${today < prev ? '▼' : '▲'} ${Math.abs(pct)}%`;
+                  const cls = flat ? 'kflat' : today < prev ? 'kdown' : 'kup';
                   return (
                     <div key={k.label} className="kpi-card">
                       <div className="kpi-label">{k.label}</div>
@@ -913,7 +1151,7 @@ export function ReportingPage() {
                         <span>{k.value}</span>
                       </div>
                       <div className="kpi-chart tall">
-                        <KpiChart data={series} labels={DAYS} yTicks={k.yTicks} fmtY={k.fmtY} />
+                        <KpiChart data={series} labels={dash.labels} yTicks={k.yTicks} fmtY={k.fmtY} />
                       </div>
                       <button className="kpi-link" onClick={() => setActive('sales')}>View report</button>
                     </div>
@@ -942,7 +1180,7 @@ export function ReportingPage() {
                       <span className="r">{fmt(v.rev)}</span>
                       <span className="r">{v.qty}</span>
                       <span className="r">$0.00</span>
-                      <span className="r ps-trend"><Sparkline data={[3, 5, 4, 6, 5, 7, ((i * 3) % 4) + 3, 4]} height={26} /></span>
+                      <span className="r ps-trend"><Sparkline data={trendMap.get(name) ?? [0, 0, 0, 0, 0, 0, 0]} height={26} /></span>
                     </div>
                   ))
                 )}
@@ -958,17 +1196,19 @@ export function ReportingPage() {
                   <span className="r">Avg. sale value</span>
                   <span className="r">Avg. items per sale</span>
                 </div>
-                {count === 0 ? (
+                {salesPeople.length === 0 ? (
                   <div className="rep-empty">No data available for this period.</div>
                 ) : (
-                  <div className="tsp-row">
-                    <span className="rlink">{STORE.cashier}</span>
-                    <span className="r">{fmt(revenue)}</span>
-                    <span className="r">{count}</span>
-                    <span className="r">{itemsTotal}</span>
-                    <span className="r">{fmt(avgSale)}</span>
-                    <span className="r">{count ? (itemsTotal / count).toFixed(1) : '0'}</span>
-                  </div>
+                  salesPeople.map(([name, v]) => (
+                    <div key={name} className="tsp-row">
+                      <span className="rlink">{name}</span>
+                      <span className="r">{fmt(v.rev)}</span>
+                      <span className="r">{v.count}</span>
+                      <span className="r">{v.items}</span>
+                      <span className="r">{fmt(v.count ? Math.round(v.rev / v.count) : 0)}</span>
+                      <span className="r">{v.count ? (v.items / v.count).toFixed(1) : '0'}</span>
+                    </div>
+                  ))
                 )}
               </div>
             </>

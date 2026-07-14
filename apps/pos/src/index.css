@@ -5254,6 +5254,12 @@ input {
   max-width: 520px;
 }
 
+.pd-auth-error {
+  color: #d64545;
+  font-size: 12px;
+  margin-top: 6px;
+}
+
 /* ===== Profile drawer ===== */
 .pd-overlay {
   position: fixed;

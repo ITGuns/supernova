@@ -1,7 +1,10 @@
+import { useState } from 'react';
 import { fmt } from '../lib/format';
 import { computeTotals } from '../lib/totals';
 import { useCart } from '../store/cartStore';
+import { useCustomers } from '../store/customerStore';
 import { useSettings } from '../store/settingsStore';
+import '../styles/sell.css';
 
 export function RegisterCart({ onPay }: { onPay: () => void }) {
   const lines = useCart((s) => s.lines);
@@ -10,16 +13,39 @@ export function RegisterCart({ onPay }: { onPay: () => void }) {
   const dec = useCart((s) => s.decrementLine);
   const remove = useCart((s) => s.removeLine);
   const toggleDiscount = useCart((s) => s.toggleDiscount);
+  const customerName = useCart((s) => s.customerName);
+  const setCustomer = useCart((s) => s.setCustomer);
+  const orderNote = useCart((s) => s.orderNote);
+  const setOrderNote = useCart((s) => s.setOrderNote);
+  const customers = useCustomers((s) => s.customers);
   const taxBps = useSettings((s) => s.defaultTaxRateBps);
+  const [showNote, setShowNote] = useState(false);
+  const [showPromo, setShowPromo] = useState(false);
+  const [promo, setPromo] = useState('');
+  const [promoMsg, setPromoMsg] = useState<'ok' | 'err' | null>(null);
 
   const totals = computeTotals(lines, discountBps, 'USD', taxBps);
   const empty = lines.length === 0;
+
+  const applyPromo = () => {
+    if (promo.trim().toUpperCase() === 'NOVA10') {
+      if (discountBps === 0) toggleDiscount();
+      setPromoMsg('ok');
+    } else {
+      setPromoMsg('err');
+    }
+  };
 
   return (
     <section className="dcart">
       <div className="dcart-customer">
         <span className="dcart-cust-icon">☺</span>
-        <input placeholder="Add a customer" />
+        <input placeholder="Add a customer" list="dcart-cust-list" value={customerName} onChange={(e) => setCustomer(e.target.value)} />
+        <datalist id="dcart-cust-list">
+          {customers.map((c) => (
+            <option key={c.id} value={`${c.firstName} ${c.lastName}`.trim()} />
+          ))}
+        </datalist>
       </div>
 
       <div className="dcart-lines">
@@ -75,13 +101,35 @@ export function RegisterCart({ onPay }: { onPay: () => void }) {
         >
           <span className="lock">🔒</span> Discount
         </button>
-        <button className="dcart-add-link" disabled>
+        <button
+          className="dcart-add-link"
+          disabled={empty}
+          onClick={() => { setShowPromo((v) => !v); setPromoMsg(null); }}
+        >
           <span className="lock">🔒</span> Promo code
         </button>
-        <button className="dcart-add-link note" disabled>
-          Note
+        <button
+          className={`dcart-add-link note ${orderNote ? 'on' : ''}`}
+          onClick={() => setShowNote((v) => !v)}
+        >
+          Note{orderNote ? ' ●' : ''}
         </button>
       </div>
+
+      {showNote && (
+        <div className="dcart-extra">
+          <textarea value={orderNote} onChange={(e) => setOrderNote(e.target.value)} placeholder="Add a note to this sale" />
+        </div>
+      )}
+      {showPromo && (
+        <div className="dcart-extra">
+          <div className="dcart-promo">
+            <input value={promo} onChange={(e) => { setPromo(e.target.value); setPromoMsg(null); }} placeholder="Enter promo code" />
+            <button className="btn-s" onClick={applyPromo}>Apply</button>
+          </div>
+          {promoMsg && <span className={`dcart-promo-msg ${promoMsg}`}>{promoMsg === 'ok' ? 'Promo applied' : 'Invalid code'}</span>}
+        </div>
+      )}
 
       <button className={`dpay ${empty ? 'dpay-empty' : ''}`} disabled={empty} onClick={onPay}>
         <span className="dpay-l">

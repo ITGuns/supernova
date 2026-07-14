@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { newId, useSetup, type PaymentType } from '../store/setupStore';
 import { PaymentsGraphic } from './illustrations';
 
 function PayIcon({ kind }: { kind: 'cash' | 'card' }) {
@@ -21,48 +22,48 @@ function PayIcon({ kind }: { kind: 'cash' | 'card' }) {
   );
 }
 
-interface PayType {
-  name: string;
-  sub: string;
-  icon: 'cash' | 'card';
-}
+// The persisted icon is a free-form string (seeded types use emoji) — anything
+// cash-like renders the cash art, everything else the card art.
+const kindOf = (icon: string): 'cash' | 'card' => (icon === 'cash' || icon === '💵' ? 'cash' : 'card');
 
 export function PaymentTypesSettings() {
-  const [types, setTypes] = useState<PayType[]>([
-    { name: 'Cash', sub: '', icon: 'cash' },
-    { name: 'Card', sub: 'Nova Payments', icon: 'card' },
-    { name: 'Gift card', sub: 'Other payment method', icon: 'card' },
-    { name: 'Store credit', sub: 'Other payment method', icon: 'card' },
-  ]);
+  const types = useSetup((s) => s.paymentTypes);
+  const set = useSetup((s) => s.set);
 
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editSub, setEditSub] = useState('');
   const [editIcon, setEditIcon] = useState<'cash' | 'card'>('card');
 
+  const openEdit = (t: PaymentType) => {
+    setEditingId(t.id);
+    setEditName(t.name);
+    setEditSub(t.sub);
+    setEditIcon(kindOf(t.icon));
+  };
+
   const addType = () =>
-    setTypes((t) => [
-      ...t,
-      { name: `Payment ${t.length + 1}`, sub: 'Other payment method', icon: 'card' },
-    ]);
+    set({
+      paymentTypes: [
+        ...types,
+        { id: newId(), name: `Payment ${types.length + 1}`, sub: 'Other payment method', icon: 'card' },
+      ],
+    });
 
   const saveEdit = () => {
-    if (editingIndex === null) return;
-    setTypes((prev) =>
-      prev.map((t, idx) => {
-        if (idx === editingIndex) {
-          return { name: editName, sub: editSub, icon: editIcon };
-        }
-        return t;
-      })
-    );
-    setEditingIndex(null);
+    if (editingId === null) return;
+    set({
+      paymentTypes: types.map((t) =>
+        t.id === editingId ? { ...t, name: editName, sub: editSub, icon: editIcon } : t,
+      ),
+    });
+    setEditingId(null);
   };
 
   const deleteType = () => {
-    if (editingIndex === null) return;
-    setTypes((prev) => prev.filter((_, idx) => idx !== editingIndex));
-    setEditingIndex(null);
+    if (editingId === null) return;
+    set({ paymentTypes: types.filter((t) => t.id !== editingId) });
+    setEditingId(null);
   };
 
   return (
@@ -80,54 +81,36 @@ export function PaymentTypesSettings() {
         <div>
           <div className="promo-title">Apply for Nova Payments to process card payments</div>
           <div className="promo-text">
-            Get everything you need to process sales and get paid, all in one place. Learn more about the
-            Nova Payment application process in our <span className="rlink">Help Center ↗</span>.
+            Get everything you need to process sales and get paid, all in one place. Nova Payments
+            applications aren’t available in this demo.
           </div>
-          <button className="btn-s">Apply now</button>
         </div>
       </div>
 
       <div className="paytypes-h">Payment types</div>
       <div className="paylist">
-        {types.map((t, index) => (
-          <div key={`${t.name}-${index}`} className="payrow">
-            <PayIcon kind={t.icon} />
+        {types.map((t) => (
+          <div key={t.id} className="payrow">
+            <PayIcon kind={kindOf(t.icon)} />
             <span className="pay-name">
-              <span
-                className="rlink"
-                onClick={() => {
-                  setEditingIndex(index);
-                  setEditName(t.name);
-                  setEditSub(t.sub);
-                  setEditIcon(t.icon);
-                }}
-              >
+              <span className="rlink" onClick={() => openEdit(t)}>
                 {t.name}
               </span>
               {t.sub && <span className="pay-sub">{t.sub}</span>}
             </span>
-            <span
-              className="pay-edit"
-              style={{ cursor: 'pointer' }}
-              onClick={() => {
-                setEditingIndex(index);
-                setEditName(t.name);
-                setEditSub(t.sub);
-                setEditIcon(t.icon);
-              }}
-            >
+            <span className="pay-edit" style={{ cursor: 'pointer' }} onClick={() => openEdit(t)}>
               ✎
             </span>
           </div>
         ))}
       </div>
 
-      {editingIndex !== null && (
-        <div className="pm-overlay" onClick={() => setEditingIndex(null)}>
+      {editingId !== null && (
+        <div className="pm-overlay" onClick={() => setEditingId(null)}>
           <div className="pm" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '460px' }}>
             <div className="pm-head">
               <h2>Edit payment type</h2>
-              <button className="pm-close" onClick={() => setEditingIndex(null)} aria-label="Close">
+              <button className="pm-close" onClick={() => setEditingId(null)} aria-label="Close">
                 ×
               </button>
             </div>
@@ -228,7 +211,7 @@ export function PaymentTypesSettings() {
                   Delete payment type
                 </button>
                 <div style={{ display: 'flex', gap: '10px' }}>
-                  <button className="btn-s" onClick={() => setEditingIndex(null)} type="button">
+                  <button className="btn-s" onClick={() => setEditingId(null)} type="button">
                     Cancel
                   </button>
                   <button className="btn-p" onClick={saveEdit} disabled={!editName.trim()} type="button">

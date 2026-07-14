@@ -1,42 +1,29 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { fmt } from '../lib/format';
-
-interface Movement {
-  id: string;
-  at: string;
-  user: string;
-  email: string;
-  init: string;
-  av: string;
-  type: string;
-  amountMinor: number;
-}
+import { useRegisterSession } from '../store/registerSessionStore';
+import { initials, useUsers } from '../store/userStore';
+import '../styles/sell.css';
 
 export function CashManagement() {
-  const [movements, setMovements] = useState<Movement[]>([]);
+  const status = useRegisterSession((s) => s.status);
+  const movements = useRegisterSession((s) => s.movements);
+  const addMovement = useRegisterSession((s) => s.addMovement);
+  const users = useUsers((s) => s.users);
+  const currentUserId = useUsers((s) => s.currentUserId);
+  const currentName = users.find((u) => u.id === currentUserId)?.name ?? 'Staff';
   const [mode, setMode] = useState<'add' | 'remove' | null>(null);
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+  const closed = status === 'closed';
 
   const confirm = () => {
     const val = Math.round(parseFloat(amount || '0') * 100);
-    if (!val || val <= 0) {
+    if (!mode || !val || val <= 0) {
       setMode(null);
       return;
     }
-    setMovements((m) => [
-      {
-        id: `${Date.now()}`,
-        at: 'Just now',
-        user: 'Aleina (Aleina)',
-        email: 'aleina@nova.local',
-        init: 'A',
-        av: '#4b3df5',
-        type: mode === 'add' ? (note || 'Cash in') : (note || 'Cash out'),
-        amountMinor: mode === 'remove' ? -val : val,
-      },
-      ...m,
-    ]);
+    addMovement({ type: mode === 'add' ? 'ADD' : 'REMOVE', amountMinor: val, note, by: currentName });
     setMode(null);
     setAmount('');
     setNote('');
@@ -47,15 +34,22 @@ export function CashManagement() {
       <div className="csm-headrow">
         <h1 className="sell-title">Cash Management</h1>
         <div className="csm-headbtns">
-          <button className="btn-danger" onClick={() => { setMode('remove'); setAmount(''); setNote(''); }}>Remove cash</button>
-          <button className="btn-primary" onClick={() => { setMode('add'); setAmount(''); setNote(''); }}>Add cash</button>
+          <button className="btn-danger" disabled={closed} onClick={() => { setMode('remove'); setAmount(''); setNote(''); }}>Remove cash</button>
+          <button className="btn-primary" disabled={closed} onClick={() => { setMode('add'); setAmount(''); setNote(''); }}>Add cash</button>
         </div>
       </div>
       <div className="sell-subbar">
-        Record your cash movements for the day. <span className="rlink">Need help? ↗</span>
+        Record your cash movements for the day. <Link className="rlink" to="/sell/status">Need help? ↗</Link>
       </div>
 
-      {mode && (
+      {closed && (
+        <div className="sell-note">
+          The register is closed — cash movements can only be recorded while a register is open.{' '}
+          <Link className="rlink" to="/sell/open-close">Open/Close register</Link>
+        </div>
+      )}
+
+      {mode && !closed && (
         <div className="csm-form">
           <div className="csm-form-h">{mode === 'add' ? 'Add cash' : 'Remove cash'}</div>
           <div className="csm-form-row">
@@ -83,17 +77,20 @@ export function CashManagement() {
           <span className="r">Transactions ($)</span>
         </div>
         {movements.length === 0 && <div className="csm-empty">No cash movements recorded yet.</div>}
-        {movements.map((m) => (
-          <div key={m.id} className="csm-row">
-            <span>{m.at}</span>
-            <span className="csm-user">
-              <span className="cust-av csm-av" style={{ background: m.av }}>{m.init}</span>
-              <span>{m.user}<br /><span className="csm-email">{m.email}</span></span>
-            </span>
-            <span>{m.type}</span>
-            <span className="r">{(m.amountMinor / 100).toFixed(2)}</span>
-          </div>
-        ))}
+        {movements.map((m) => {
+          const u = users.find((x) => x.name === m.by);
+          return (
+            <div key={m.id} className="csm-row">
+              <span>{new Date(m.at).toLocaleString()}</span>
+              <span className="csm-user">
+                <span className="cust-av csm-av" style={{ background: u?.av ?? '#4b3df5' }}>{initials(m.by)}</span>
+                <span>{m.by}{u ? <><br /><span className="csm-email">{u.email}</span></> : null}</span>
+              </span>
+              <span>{m.note || (m.type === 'ADD' ? 'Cash in' : 'Cash out')}</span>
+              <span className="r">{m.type === 'REMOVE' ? `-${fmt(m.amountMinor)}` : fmt(m.amountMinor)}</span>
+            </div>
+          );
+        })}
       </div>
     </main>
   );

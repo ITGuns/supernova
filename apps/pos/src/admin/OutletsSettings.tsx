@@ -1,28 +1,69 @@
-import { useState } from 'react';
-
-interface Outlet {
-  name: string;
-  registers: string[];
-}
-interface Receipt {
-  name: string;
-  style: string;
-}
+import { useState, type KeyboardEvent } from 'react';
+import { newId, useSetup, type Outlet, type ReceiptTemplate } from '../store/setupStore';
+import '../styles/setup.css';
 
 export function OutletsSettings() {
   const [tab, setTab] = useState<'outlets' | 'receipts'>('outlets');
-  const [outlets, setOutlets] = useState<Outlet[]>([
-    { name: 'Main Outlet', registers: ['Main Register'] },
-  ]);
-  const [receipts, setReceipts] = useState<Receipt[]>([
-    { name: 'Standard Receipt', style: 'Thermal' },
-  ]);
+  const outlets = useSetup((s) => s.outlets);
+  const templates = useSetup((s) => s.receiptTemplates);
+  const set = useSetup((s) => s.set);
   const [expanded, setExpanded] = useState<string | null>(null);
 
+  // Inline rename state: which thing is being renamed, and the draft text.
+  const [editingOutlet, setEditingOutlet] = useState<string | null>(null);
+  const [editingTemplate, setEditingTemplate] = useState<string | null>(null);
+  const [editingReg, setEditingReg] = useState<{ outletId: string; idx: number } | null>(null);
+  const [draft, setDraft] = useState('');
+
   const addOutlet = () =>
-    setOutlets((o) => [...o, { name: `Outlet ${o.length + 1}`, registers: ['Register 1'] }]);
-  const addReceipt = () =>
-    setReceipts((r) => [...r, { name: `Receipt template ${r.length + 1}`, style: 'Thermal' }]);
+    set({
+      outlets: [...outlets, { id: newId(), name: `Outlet ${outlets.length + 1}`, registers: ['Register 1'] }],
+    });
+  const addTemplate = () =>
+    set({
+      receiptTemplates: [...templates, { id: newId(), name: `Receipt template ${templates.length + 1}` }],
+    });
+
+  const saveOutletName = () => {
+    if (editingOutlet !== null) {
+      const name = draft.trim();
+      if (name) {
+        set({ outlets: outlets.map((o): Outlet => (o.id === editingOutlet ? { ...o, name } : o)) });
+      }
+    }
+    setEditingOutlet(null);
+  };
+  const saveTemplateName = () => {
+    if (editingTemplate !== null) {
+      const name = draft.trim();
+      if (name) {
+        set({
+          receiptTemplates: templates.map((t): ReceiptTemplate => (t.id === editingTemplate ? { ...t, name } : t)),
+        });
+      }
+    }
+    setEditingTemplate(null);
+  };
+  const saveRegisterName = () => {
+    if (editingReg !== null) {
+      const name = draft.trim();
+      if (name) {
+        set({
+          outlets: outlets.map((o): Outlet =>
+            o.id === editingReg.outletId
+              ? { ...o, registers: o.registers.map((r, i) => (i === editingReg.idx ? name : r)) }
+              : o,
+          ),
+        });
+      }
+    }
+    setEditingReg(null);
+  };
+
+  const keyHandler = (save: () => void, cancel: () => void) => (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') save();
+    if (e.key === 'Escape') cancel();
+  };
 
   return (
     <>
@@ -39,9 +80,7 @@ export function OutletsSettings() {
       {tab === 'outlets' ? (
         <>
           <div className="subbar-row">
-            <span>
-              Manage your outlets and registers. <span className="rlink">Need help? ↗</span>
-            </span>
+            <span>Manage your outlets and registers.</span>
             <button className="btn-p" onClick={addOutlet}>
               Add outlet
             </button>
@@ -53,23 +92,66 @@ export function OutletsSettings() {
               <span />
             </div>
             {outlets.map((o) => (
-              <div key={o.name}>
-                <div className="arow out" onClick={() => setExpanded((e) => (e === o.name ? null : o.name))}>
+              <div key={o.id}>
+                <div className="arow out" onClick={() => setExpanded((e) => (e === o.id ? null : o.id))}>
                   <span className="out-name">
-                    <span className={`out-chev ${expanded === o.name ? 'open' : ''}`}>›</span>
-                    {o.name}
+                    <span className={`out-chev ${expanded === o.id ? 'open' : ''}`}>›</span>
+                    {editingOutlet === o.id ? (
+                      <input
+                        className="inline-rename"
+                        value={draft}
+                        autoFocus
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => setDraft(e.target.value)}
+                        onBlur={saveOutletName}
+                        onKeyDown={keyHandler(saveOutletName, () => setEditingOutlet(null))}
+                      />
+                    ) : (
+                      o.name
+                    )}
                   </span>
                   <span>
                     {o.registers.length} register{o.registers.length === 1 ? '' : 's'}
                   </span>
-                  <span className="c out-edit">✎</span>
+                  <span
+                    className="c out-edit"
+                    title="Rename outlet"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDraft(o.name);
+                      setEditingOutlet(o.id);
+                      setEditingReg(null);
+                    }}
+                  >
+                    ✎
+                  </span>
                 </div>
-                {expanded === o.name && (
+                {expanded === o.id && (
                   <div className="out-expand">
-                    {o.registers.map((r) => (
-                      <div key={r} className="out-reg">
-                        <span>{r}</span>
-                        <span className="rlink">Edit</span>
+                    {o.registers.map((r, idx) => (
+                      <div key={`${o.id}-${idx}`} className="out-reg">
+                        {editingReg && editingReg.outletId === o.id && editingReg.idx === idx ? (
+                          <input
+                            className="inline-rename"
+                            value={draft}
+                            autoFocus
+                            onChange={(e) => setDraft(e.target.value)}
+                            onBlur={saveRegisterName}
+                            onKeyDown={keyHandler(saveRegisterName, () => setEditingReg(null))}
+                          />
+                        ) : (
+                          <span>{r}</span>
+                        )}
+                        <span
+                          className="rlink"
+                          onClick={() => {
+                            setDraft(r);
+                            setEditingReg({ outletId: o.id, idx });
+                            setEditingOutlet(null);
+                          }}
+                        >
+                          Edit
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -81,10 +163,8 @@ export function OutletsSettings() {
       ) : (
         <>
           <div className="subbar-row">
-            <span>
-              Manage your receipt templates. <span className="rlink">Need help? ↗</span>
-            </span>
-            <button className="btn-p" onClick={addReceipt}>
+            <span>Manage your receipt templates.</span>
+            <button className="btn-p" onClick={addTemplate}>
               Add receipt template
             </button>
           </div>
@@ -94,11 +174,33 @@ export function OutletsSettings() {
               <span>Template style</span>
               <span />
             </div>
-            {receipts.map((r) => (
-              <div key={r.name} className="arow rcpt">
-                <span>{r.name}</span>
-                <span>{r.style}</span>
-                <span className="c out-edit">✎</span>
+            {templates.map((t) => (
+              <div key={t.id} className="arow rcpt">
+                <span>
+                  {editingTemplate === t.id ? (
+                    <input
+                      className="inline-rename"
+                      value={draft}
+                      autoFocus
+                      onChange={(e) => setDraft(e.target.value)}
+                      onBlur={saveTemplateName}
+                      onKeyDown={keyHandler(saveTemplateName, () => setEditingTemplate(null))}
+                    />
+                  ) : (
+                    t.name
+                  )}
+                </span>
+                <span>Thermal</span>
+                <span
+                  className="c out-edit"
+                  title="Rename template"
+                  onClick={() => {
+                    setDraft(t.name);
+                    setEditingTemplate(t.id);
+                  }}
+                >
+                  ✎
+                </span>
               </div>
             ))}
           </div>
