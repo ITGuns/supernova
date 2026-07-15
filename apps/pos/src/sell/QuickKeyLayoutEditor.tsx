@@ -197,7 +197,16 @@ export function QuickKeyLayoutEditor() {
               <div className="qkl-results">
                 <div className="qkl-results-list">
                   {matches.map((p) => (
-                    <button key={p.id} className="qkl-result" onClick={() => place(p)}>
+                    // Select on mousedown: it fires before the input's blur closes the
+                    // picker, so the choice always registers regardless of focus quirks.
+                    <button
+                      key={p.id}
+                      className="qkl-result"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        place(p);
+                      }}
+                    >
                       <span className="qkl-thumb">
                         <Thumb image={p.image} />
                       </span>
@@ -217,7 +226,13 @@ export function QuickKeyLayoutEditor() {
                   )}
                 </div>
                 {q && (
-                  <button className="qkl-addnew" onClick={createAndPlace}>
+                  <button
+                    className="qkl-addnew"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      createAndPlace();
+                    }}
+                  >
                     ✛ Add “{query}” as a new product.
                   </button>
                 )}
