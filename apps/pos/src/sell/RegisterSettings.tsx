@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Switch } from '../admin/controls';
 import { useRegister } from '../store/registerStore';
 
 export function RegisterSettings() {
+  const nav = useNavigate();
   const training = useRegister((s) => s.trainingMode);
   const quickKeys = useRegister((s) => s.quickKeysEnabled);
   const layouts = useRegister((s) => s.layouts);
@@ -10,22 +11,9 @@ export function RegisterSettings() {
   const toggleTraining = useRegister((s) => s.toggleTraining);
   const toggleQuickKeys = useRegister((s) => s.toggleQuickKeys);
   const addLayout = useRegister((s) => s.addLayout);
-  const renameLayout = useRegister((s) => s.renameLayout);
   const duplicateLayout = useRegister((s) => s.duplicateLayout);
   const deleteLayout = useRegister((s) => s.deleteLayout);
   const setCurrentLayout = useRegister((s) => s.setCurrentLayout);
-
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState('');
-
-  const startRename = (id: string, name: string) => {
-    setEditingId(id);
-    setDraft(name);
-  };
-  const commitRename = () => {
-    if (editingId) renameLayout(editingId, draft);
-    setEditingId(null);
-  };
 
   return (
     <main className="sell-page">
@@ -72,28 +60,20 @@ export function RegisterSettings() {
               <div className="rs-layouts">
                 {layouts.map((l) => (
                   <div key={l.id} className="rs-layout">
-                    {editingId === l.id ? (
-                      <input
-                        className="rs-rename"
-                        value={draft}
-                        autoFocus
-                        onChange={(e) => setDraft(e.target.value)}
-                        onBlur={commitRename}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') commitRename();
-                          if (e.key === 'Escape') setEditingId(null);
-                        }}
-                      />
-                    ) : (
-                      <span className="rs-layout-name">{l.name}</span>
-                    )}
+                    <span className="rs-layout-name">{l.name}</span>
                     <div className="rs-layout-actions">
                       {current === l.id ? (
                         <span className="rs-current">Current Layout</span>
                       ) : (
                         <button className="btn-s" onClick={() => setCurrentLayout(l.id)}>Set as current layout</button>
                       )}
-                      <button className="rs-ic ic-edit" title="Rename" onClick={() => startRename(l.id, l.name)}>✎</button>
+                      <button
+                        className="rs-ic ic-edit"
+                        title="Edit layout"
+                        onClick={() => nav(`/sell/settings/layout/${l.id}`)}
+                      >
+                        ✎
+                      </button>
                       <button className="rs-ic" title="Duplicate" onClick={() => duplicateLayout(l.id)}>⧉</button>
                       <button
                         className="rs-ic"

@@ -13,6 +13,7 @@ import { CashManagement } from './sell/CashManagement';
 import { CloseRegister } from './sell/CloseRegister';
 import { Quotes } from './sell/Quotes';
 import { RegisterScreen } from './sell/RegisterScreen';
+import { QuickKeyLayoutEditor } from './sell/QuickKeyLayoutEditor';
 import { RegisterSettings } from './sell/RegisterSettings';
 import { RegisterStatus } from './sell/RegisterStatus';
 import { SalesHistory } from './sell/SalesHistory';
@@ -32,6 +33,7 @@ export function App() {
         <Route path="/sell/cash-management" element={<CashManagement />} />
         <Route path="/sell/status" element={<RegisterStatus />} />
         <Route path="/sell/settings" element={<RegisterSettings />} />
+        <Route path="/sell/settings/layout/:id" element={<QuickKeyLayoutEditor />} />
         <Route path="/sell/quotes" element={<Quotes />} />
       </Route>
 

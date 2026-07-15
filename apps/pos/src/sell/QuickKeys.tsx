@@ -3,6 +3,7 @@ import { CATEGORIES, CATEGORY_COLORS, type CatalogItem } from '../data/catalog';
 import { fmt } from '../lib/format';
 import { useCart } from '../store/cartStore';
 import { useProducts } from '../store/productStore';
+import { useRegister } from '../store/registerStore';
 
 export function QuickKeys({ query }: { query: string }) {
   const addItem = useCart((s) => s.addItem);
@@ -10,6 +11,11 @@ export function QuickKeys({ query }: { query: string }) {
   const CATALOG = allProducts.filter((p) => p.enabled);
   const [open, setOpen] = useState<string | null>(null);
   const q = query.trim().toLowerCase();
+
+  // A layout built in Settings → Quick keys takes over the grid.
+  const quickKeysEnabled = useRegister((s) => s.quickKeysEnabled);
+  const layout = useRegister((s) => s.layouts.find((l) => l.id === s.currentLayoutId));
+  const layoutKeys = quickKeysEnabled ? (layout?.keys ?? []) : [];
 
   const tile = (it: CatalogItem & { image?: string }) => (
     <button key={it.id} className="qk-tile" onClick={() => addItem(it)}>
@@ -31,6 +37,29 @@ export function QuickKeys({ query }: { query: string }) {
       <div className="qk-grid">
         {matches.map(tile)}
         {matches.length === 0 && <div className="qk-empty">No products match “{query}”.</div>}
+      </div>
+    );
+  }
+
+  if (layoutKeys.length > 0) {
+    const placed = [...layoutKeys].sort((a, b) => a.slot - b.slot);
+    return (
+      <div className="qk-grid">
+        {placed.map((k) => {
+          const p = CATALOG.find((x) => x.id === k.productId);
+          if (!p) return null;
+          return (
+            <button key={k.id} className="qk-tile" onClick={() => addItem(p)}>
+              <span
+                className="qk-stripe"
+                style={{ background: k.color || CATEGORY_COLORS[p.categoryId] || '#5E5E5D' }}
+              />
+              {k.showImage && p.image && <img src={p.image} alt="" className="qk-tile-img" />}
+              <span className="qk-tile-name">{k.label}</span>
+              <span className="qk-tile-price">{fmt(p.priceMinor)}</span>
+            </button>
+          );
+        })}
       </div>
     );
   }
