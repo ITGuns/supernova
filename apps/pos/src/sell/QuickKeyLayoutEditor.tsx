@@ -46,6 +46,7 @@ export function QuickKeyLayoutEditor() {
   const suppliers = useCatalogMeta((s) => s.suppliers);
 
   const [query, setQuery] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
   const [overSlot, setOverSlot] = useState<number | null>(null);
 
@@ -58,16 +59,16 @@ export function QuickKeyLayoutEditor() {
   if (!layout) return <Navigate to="/sell/settings" replace />;
 
   const q = query.trim().toLowerCase();
-  const matches = q
-    ? products
-        .filter((p) => p.enabled)
-        .filter((p) => p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q))
-        .slice(0, 6)
-    : [];
+  // Focusing the box lists every product; typing narrows it.
+  const matches = products
+    .filter((p) => p.enabled)
+    .filter((p) => !q || p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q))
+    .slice(0, 20);
 
   const place = (p: { id: string; name: string }) => {
     addKey(layout.id, p);
     setQuery('');
+    setPickerOpen(false);
   };
 
   const createAndPlace = () => {
@@ -92,6 +93,12 @@ export function QuickKeyLayoutEditor() {
     };
     addProduct(prod);
     place(prod);
+  };
+
+  // Close the picker only when focus leaves the whole search block, so clicking
+  // a result still registers.
+  const closePickerOnBlur = (e: React.FocusEvent<HTMLDivElement>) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setPickerOpen(false);
   };
 
   const openKey = (k: QuickKey) => {
@@ -171,7 +178,7 @@ export function QuickKeyLayoutEditor() {
           <label className="qkl-label" htmlFor="qkl-search">
             Search for products
           </label>
-          <div className="qkl-search-wrap">
+          <div className="qkl-search-wrap" onBlur={closePickerOnBlur}>
             <span className="qkl-search-ic" aria-hidden="true">
               ⌕
             </span>
@@ -180,26 +187,40 @@ export function QuickKeyLayoutEditor() {
               className="qkl-input qkl-search"
               placeholder="Start typing or scanning"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onFocus={() => setPickerOpen(true)}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setPickerOpen(true);
+              }}
             />
-            {q && (
+            {pickerOpen && (
               <div className="qkl-results">
-                {matches.map((p) => (
-                  <button key={p.id} className="qkl-result" onClick={() => place(p)}>
-                    <span className="qkl-thumb">
-                      <Thumb image={p.image} />
-                    </span>
-                    <span className="qkl-result-txt">
-                      <span className="qkl-result-name">{p.name}</span>
-                      <span className="qkl-result-sku">{p.sku}</span>
-                    </span>
-                    <span className="qkl-result-price">{fmt(p.priceMinor)}</span>
+                <div className="qkl-results-list">
+                  {matches.map((p) => (
+                    <button key={p.id} className="qkl-result" onClick={() => place(p)}>
+                      <span className="qkl-thumb">
+                        <Thumb image={p.image} />
+                      </span>
+                      <span className="qkl-result-txt">
+                        <span className="qkl-result-name">{p.name}</span>
+                        <span className="qkl-result-sku">{p.sku}</span>
+                      </span>
+                      <span className="qkl-result-price">{fmt(p.priceMinor)}</span>
+                    </button>
+                  ))}
+                  {matches.length === 0 && (
+                    <div className="qkl-noresult">
+                      {q
+                        ? `No products match “${query}”.`
+                        : 'No products yet. Type a name to create one.'}
+                    </div>
+                  )}
+                </div>
+                {q && (
+                  <button className="qkl-addnew" onClick={createAndPlace}>
+                    ✛ Add “{query}” as a new product.
                   </button>
-                ))}
-                {matches.length === 0 && <div className="qkl-noresult">No products match “{query}”.</div>}
-                <button className="qkl-addnew" onClick={createAndPlace}>
-                  ✛ Add “{query}” as a new product.
-                </button>
+                )}
               </div>
             )}
           </div>

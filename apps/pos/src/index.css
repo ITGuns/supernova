@@ -5319,6 +5319,10 @@ input {
   z-index: 30;
   overflow: hidden;
 }
+.qkl-results-list {
+  max-height: 264px;
+  overflow-y: auto;
+}
 .qkl-result {
   display: flex;
   align-items: center;
@@ -5383,8 +5387,9 @@ input {
   display: block;
   width: 100%;
   padding: 12px 14px;
-  background: none;
+  background: var(--panel-2);
   border: none;
+  border-top: 1px solid var(--line);
   color: var(--primary);
   font-family: inherit;
   font-size: 13px;

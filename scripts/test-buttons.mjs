@@ -666,9 +666,16 @@ await p.locator('.rs-layout', { has: p.locator('.rs-current') }).first().locator
 await p.waitForTimeout(400);
 check('settings pencil opens layout editor', /\/sell\/settings\/layout\//.test(p.url()));
 check('layout editor renders the 40-slot grid', (await p.locator('.qkl-slot').count()) === 40);
+// Clicking the box lists products with nothing typed.
+await p.locator('#qkl-search').click();
+await p.waitForTimeout(300);
+check('layout editor picker opens on click', await p.locator('.qkl-results').isVisible());
+check('layout editor picker lists products with no query', (await p.locator('.qkl-result').count()) >= 1);
+check('layout editor hides "add new" until typing', (await p.locator('.qkl-addnew').count()) === 0);
 await p.locator('#qkl-search').fill('Zzappy');
 await p.waitForTimeout(300);
 check('layout editor search finds a product', (await p.locator('.qkl-result').count()) >= 1);
+check('layout editor offers "add as a new product"', await p.locator('.qkl-addnew').isVisible());
 await p.locator('.qkl-result').first().click();
 await p.waitForTimeout(300);
 check('layout editor places a quick key', (await p.locator('.qkl-key').count()) === 1);
