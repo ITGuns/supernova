@@ -20,7 +20,10 @@ export function FinancePage() {
   const weekStart = todayStart - ((new Date(now).getDay() + 6) % 7) * 86_400_000; // Monday
   const monthStart = new Date(new Date(now).getFullYear(), new Date(now).getMonth(), 1).getTime();
 
-  const sum = (from: number) => sales.filter((s) => s.at >= from).reduce((a, s) => a + s.totalMinor, 0);
+  // Gross sales exclude returns; tender totals below stay as collected because
+  // this register has no refund tender, so the cash physically remains in the till.
+  const sum = (from: number) =>
+    sales.filter((s) => s.status !== 'Returned' && s.at >= from).reduce((a, s) => a + s.totalMinor, 0);
 
   let cash = 0;
   let card = 0;

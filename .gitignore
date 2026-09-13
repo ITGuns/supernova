@@ -35,3 +35,6 @@ coverage/
 # Prisma local db files
 *.db
 *.db-journal
+.vercel
+.env*
+.claude/settings.local.json

@@ -54,6 +54,9 @@ export function SalesHistory() {
   const [dateTo, setDateTo] = useState(() => isoDate(Date.now()));
   const [more, setMore] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  // Sale awaiting return confirmation. Returning is irreversible (restocks
+  // inventory and removes the sale from revenue), so never do it on one click.
+  const [confirmReturn, setConfirmReturn] = useState<HSale | null>(null);
 
   const allSales: HSale[] = sales.map((s) => ({
     orderNumber: s.orderNumber,
@@ -105,7 +108,11 @@ export function SalesHistory() {
   };
 
   const doReturn = (s: HSale) => {
-    if (s.status !== 'Returned') markReturned(s.orderNumber);
+    if (s.status !== 'Returned') setConfirmReturn(s);
+  };
+  const commitReturn = () => {
+    if (confirmReturn) markReturned(confirmReturn.orderNumber);
+    setConfirmReturn(null);
   };
 
   const exportCsv = () => {
@@ -237,6 +244,41 @@ export function SalesHistory() {
             </>
           )}
         </>
+      )}
+
+      {confirmReturn && (
+        <div className="pm-overlay" onClick={() => setConfirmReturn(null)}>
+          <div className="pm sh-confirm" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="sh-confirm-title">
+            <div className="pm-head">
+              <h2 id="sh-confirm-title">Return sale {confirmReturn.receipt}?</h2>
+              <button className="pm-close" onClick={() => setConfirmReturn(null)} aria-label="Close">×</button>
+            </div>
+            <div className="pm-body sh-confirm-body">
+              <div className="pm-receipt">
+                <div className="pm-receipt-title">Items to be restocked</div>
+                <div className="pm-lines">
+                  {confirmReturn.lines.map((l, i) => (
+                    <div key={i} className="pm-line">
+                      <span className="pm-qty">{l.qty}×</span>
+                      <span className="pm-name">{l.name}</span>
+                      <span className="pm-amt">{fmt(l.priceMinor * l.qty)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="pm-totals">
+                  <div className="dtrow pm-total"><span>Sale total</span><span>{fmt(confirmReturn.totalMinor)}</span></div>
+                </div>
+                <p className="sh-confirm-hint">
+                  This marks the sale as returned, puts the items back into stock and removes {fmt(confirmReturn.totalMinor)} from reported revenue. It can’t be undone.
+                </p>
+              </div>
+            </div>
+            <div className="sh-confirm-actions">
+              <button className="btn-s" onClick={() => setConfirmReturn(null)}>Cancel</button>
+              <button className="btn-p" onClick={commitReturn}>Confirm return</button>
+            </div>
+          </div>
+        </div>
       )}
     </main>
   );

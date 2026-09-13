@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { initials, useUsers } from '../store/userStore';
+import { hashPassword } from '../lib/password';
+import { initials, useUsers, type AppUser } from '../store/userStore';
 import { Switch } from './controls';
 
 const AVS = ['#5b8fd6', '#3fae6b', '#e6a817', '#e0483f', '#7c3aed'];
@@ -29,14 +30,17 @@ export function UsersSettings() {
 
   const toggle = (id: string) => togU(id);
 
-  const addUser = () => {
+  const addUser = async () => {
     const n = users.length + 1;
-    addU({ name: `New User ${n}`, email: `new${n}@nova.local`, role: 'Cashier', password: 'nova1234', last: 'just now', enabled: true, av: AVS[n % AVS.length]! });
+    addU({ name: `New User ${n}`, email: `new${n}@nova.local`, role: 'Cashier', password: await hashPassword('nova1234'), last: 'just now', enabled: true, av: AVS[n % AVS.length]! });
   };
 
-  const saveUserEdit = () => {
+  const saveUserEdit = async () => {
     if (!editingId) return;
-    updU(editingId, { name: editName, email: editEmail, role: editRole, password: editPassword });
+    // A blank password field means "keep the current one" — we never prefill it.
+    const patch: Partial<AppUser> = { name: editName, email: editEmail, role: editRole };
+    if (editPassword.trim()) patch.password = await hashPassword(editPassword);
+    updU(editingId, patch);
     setEditingId(null);
   };
 
@@ -117,7 +121,7 @@ export function UsersSettings() {
                         setEditName(u.name);
                         setEditEmail(u.email);
                         setEditRole(u.role);
-                        setEditPassword(u.password);
+                        setEditPassword('');
                       }}
                       style={{ cursor: 'pointer', fontWeight: 600 }}
                     >
@@ -213,7 +217,7 @@ export function UsersSettings() {
                   className="set-input"
                   value={editPassword}
                   onChange={(e) => setEditPassword(e.target.value)}
-                  placeholder="Set a login password"
+                  placeholder="Leave blank to keep current password"
                   style={{ width: '100%', boxSizing: 'border-box' }}
                 />
                 <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '6px' }}>Used to log in and to switch users.</div>

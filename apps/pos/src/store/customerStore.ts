@@ -22,10 +22,34 @@ const uid = (): string =>
     ? crypto.randomUUID()
     : `id-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
 
-// CustomerRow is already flat — the column names match closely enough
-// that we only need to snake_case the keys that differ.
-const toRow = (c: CustomerRow): Record<string, unknown> => ({ ...c });
-const fromRow = (r: Record<string, unknown>): CustomerRow => r as unknown as CustomerRow;
+// Map between the app's camelCase CustomerRow and the snake_case DB columns.
+// The previous spread-through wrote camelCase keys the table rejected, so
+// every customer write 409'd and nothing ever reached Supabase.
+const toRow = (c: CustomerRow): Record<string, unknown> => ({
+  id: c.id,
+  first_name: c.firstName,
+  last_name: c.lastName,
+  code: c.code,
+  email: c.email || null,
+  phone: c.phone || null,
+  group: c.group,
+  store_credit_minor: c.storeCreditMinor,
+  loyalty_points: c.loyaltyMinor,
+  account_minor: c.accountMinor,
+});
+
+const fromRow = (r: Record<string, unknown>): CustomerRow => ({
+  id: r.id as string,
+  firstName: (r.first_name as string | null) ?? '',
+  lastName: (r.last_name as string | null) ?? '',
+  code: (r.code as string | null) ?? '',
+  group: (r.group as string | null) ?? 'All Customers',
+  email: (r.email as string | null) ?? '',
+  phone: (r.phone as string | null) ?? '',
+  storeCreditMinor: (r.store_credit_minor as number | null) ?? 0,
+  loyaltyMinor: (r.loyalty_points as number | null) ?? 0,
+  accountMinor: (r.account_minor as number | null) ?? 0,
+});
 
 export const useCustomers = create<CustomerState>()(
   persist(

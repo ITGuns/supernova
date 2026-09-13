@@ -41,6 +41,7 @@ export function PayModal({ onClose }: { onClose: () => void }) {
         name: l.name,
         quantity: l.quantity,
         unitPriceMinor: l.unitPriceMinor,
+        variantId: l.variantId,
       })),
     });
     onClose();

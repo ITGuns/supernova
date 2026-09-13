@@ -128,7 +128,9 @@ create table if not exists catalog_meta (
   kind        text not null check (kind in ('categories','brands','suppliers')),
   name        text not null,
   description text,
-  created_at  timestamptz not null default now()
+  created_at  timestamptz not null default now(),
+  -- One "Seasonal" category, one "Nova" brand, etc. Imports must not duplicate.
+  constraint catalog_meta_kind_name_key unique (kind, name)
 );
 
 -- ── Products ─────────────────────────────────────────────────
@@ -170,6 +172,8 @@ create table if not exists customers (
   notes           text,
   loyalty_points  int not null default 0,
   store_credit_minor int not null default 0,
+  account_minor   int not null default 0,
+  code            text,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );
@@ -203,10 +207,13 @@ create table if not exists sales (
 
 -- ── Parked Sales ─────────────────────────────────────────────
 create table if not exists parked_sales (
-  id          text primary key,
-  label       text not null,
-  lines       jsonb not null default '[]',
-  parked_at   timestamptz not null default now()
+  id            text primary key,
+  label         text not null,
+  lines         jsonb not null default '[]',
+  parked_at     timestamptz not null default now(),
+  discount_bps  int not null default 0,
+  customer_name text,
+  note          text
 );
 
 -- ── Quotes ───────────────────────────────────────────────────

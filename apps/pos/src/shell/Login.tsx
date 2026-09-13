@@ -82,8 +82,8 @@ export function Login() {
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
 
-  const login = () => {
-    const user = authenticate(username, password);
+  const login = async () => {
+    const user = await authenticate(username, password);
     if (!user) {
       setError('Incorrect username or password.');
       return;
@@ -108,7 +108,7 @@ export function Login() {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                login();
+                void login();
               }}
             >
               <div className="login-field">

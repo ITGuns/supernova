@@ -20,6 +20,10 @@ export interface ParkedSale {
   label: string;
   lines: CartLine[];
   parkedAt: number;
+  /** Order-level state preserved so the sale restores exactly as parked. */
+  discountBps: number;
+  customerName: string;
+  note: string;
 }
 
 export type TenderMethod = 'CASH' | 'CARD';
@@ -34,6 +38,8 @@ export interface SaleLine {
   name: string;
   quantity: number;
   unitPriceMinor: number;
+  /** Product id, so a return restocks the exact variant (names can repeat). */
+  variantId?: string;
 }
 
 export interface CompletedSale {
@@ -88,6 +94,12 @@ const uid = (): string =>
 
 const orderNumber = (seq: number): string => `#${1000 + seq}`;
 
+/** Parse the numeric part of an order label like "#1002" → 1002. */
+const orderNumToInt = (label: string): number => {
+  const n = parseInt(label.replace(/[^0-9]/g, ''), 10);
+  return Number.isFinite(n) ? n : 0;
+};
+
 // Map a CompletedSale to the sales table row (snake_case).
 const saleToRow = (s: CompletedSale): Record<string, unknown> => ({
   order_number: s.orderNumber,
@@ -124,6 +136,9 @@ const parkedToRow = (p: ParkedSale): Record<string, unknown> => ({
   label: p.label,
   lines: p.lines,
   parked_at: new Date(p.parkedAt).toISOString(),
+  discount_bps: p.discountBps,
+  customer_name: p.customerName || null,
+  note: p.note || null,
 });
 
 const rowToParked = (r: Record<string, unknown>): ParkedSale => ({
@@ -131,6 +146,9 @@ const rowToParked = (r: Record<string, unknown>): ParkedSale => ({
   label: r.label as string,
   lines: r.lines as CartLine[],
   parkedAt: new Date(r.parked_at as string).getTime(),
+  discountBps: (r.discount_bps as number | null) ?? 0,
+  customerName: (r.customer_name as string | null) ?? '',
+  note: (r.note as string | null) ?? '',
 });
 
 export const useCart = create<CartState>()(
@@ -152,7 +170,17 @@ export const useCart = create<CartState>()(
     ]);
     const sales = salesRows.map(rowToSale);
     const parked = parkedRows.map(rowToParked);
-    if (sales.length || parked.length) set({ sales, parked });
+    // Advance the order counter past every number already in the cloud so a
+    // fresh browser (empty localStorage) can never reissue an existing number.
+    const maxNum = Math.max(
+      1000,
+      ...sales.map((s) => orderNumToInt(s.orderNumber)),
+      ...parked.map((p) => orderNumToInt(p.label)),
+    );
+    set((state) => ({
+      ...(sales.length || parked.length ? { sales, parked } : {}),
+      orderSeq: Math.max(state.orderSeq, maxNum - 1000 + 1),
+    }));
   },
 
   addItem: (item) =>
@@ -206,12 +234,17 @@ export const useCart = create<CartState>()(
         label: orderNumber(state.orderSeq),
         lines: state.lines,
         parkedAt: Date.now(),
+        discountBps: state.orderDiscountBps,
+        customerName: state.customerName,
+        note: state.orderNote,
       };
       dbParked.insert(parkedToRow(parkedSale));
       return {
         parked: [parkedSale, ...state.parked],
         lines: [],
         orderDiscountBps: 0,
+        customerName: '',
+        orderNote: '',
         orderSeq: state.orderSeq + 1,
       };
     }),
@@ -221,7 +254,13 @@ export const useCart = create<CartState>()(
       const sale = state.parked.find((p) => p.id === id);
       if (!sale) return state;
       dbParked.del(id);
-      return { lines: sale.lines, parked: state.parked.filter((p) => p.id !== id) };
+      return {
+        lines: sale.lines,
+        orderDiscountBps: sale.discountBps,
+        customerName: sale.customerName,
+        orderNote: sale.note,
+        parked: state.parked.filter((p) => p.id !== id),
+      };
     }),
 
   discardParked: (id) => {
@@ -279,7 +318,11 @@ export const useCart = create<CartState>()(
     if (!sale.training) {
       const prodStore = useProducts.getState();
       for (const line of sale.lines) {
-        const prod = prodStore.products.find((p) => p.name === line.name);
+        // Prefer the exact variant id; fall back to name for legacy sales
+        // recorded before variantId was persisted.
+        const prod = line.variantId
+          ? prodStore.products.find((p) => p.id === line.variantId)
+          : prodStore.products.find((p) => p.name === line.name);
         if (prod) prodStore.updateProduct(prod.id, { available: prod.available + line.quantity });
       }
     }

@@ -42,15 +42,22 @@ export const useCatalogMeta = create<CatalogMetaState>()(
         const categories: MetaEntity[] = [];
         const brands: MetaEntity[] = [];
         const suppliers: MetaEntity[] = [];
+        // Collapse duplicate names within each kind so a filter dropdown never
+        // shows "Seasonal" nine times if the source data ever contains dupes.
+        const seen = { categories: new Set<string>(), brands: new Set<string>(), suppliers: new Set<string>() };
         for (const r of rows) {
           const entity: MetaEntity = {
             id: r.id as string,
             name: r.name as string,
             description: r.description as string | undefined,
           };
-          if (r.kind === 'categories') categories.push(entity);
-          else if (r.kind === 'brands') brands.push(entity);
-          else suppliers.push(entity);
+          const bucket =
+            r.kind === 'categories' ? categories : r.kind === 'brands' ? brands : suppliers;
+          const kindSeen = seen[r.kind as keyof typeof seen] ?? seen.categories;
+          const key = entity.name.trim().toLowerCase();
+          if (kindSeen.has(key)) continue;
+          kindSeen.add(key);
+          bucket.push(entity);
         }
         set({ categories, brands, suppliers });
       },

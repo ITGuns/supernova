@@ -9,6 +9,7 @@ import { ReportingPage } from './admin/ReportingPage';
 import { SetupPage } from './admin/SetupPage';
 import { AdminLayout } from './shell/AdminLayout';
 import { Login } from './shell/Login';
+import { SyncToast } from './shell/SyncToast';
 import { CashManagement } from './sell/CashManagement';
 import { CloseRegister } from './sell/CloseRegister';
 import { Quotes } from './sell/Quotes';
@@ -21,6 +22,8 @@ import { SellLayout } from './sell/SellLayout';
 
 export function App() {
   return (
+    <>
+    <SyncToast />
     <Routes>
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="/login" element={<Login />} />
@@ -51,5 +54,6 @@ export function App() {
 
       <Route path="*" element={<Navigate to="/sell" replace />} />
     </Routes>
+    </>
   );
 }

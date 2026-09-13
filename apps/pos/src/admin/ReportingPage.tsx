@@ -324,7 +324,7 @@ export function ReportingPage() {
     const buckets = starts.map((d) => {
       const s0 = d.getTime();
       const s1 = bucketEnd(d);
-      const inB = sales.filter((x) => x.at >= s0 && x.at < s1);
+      const inB = sales.filter((x) => x.status !== 'Returned' && x.at >= s0 && x.at < s1);
       const rev = inB.reduce((a, x) => a + x.totalMinor, 0);
       const items = inB.reduce((a, x) => a + x.lines.reduce((q, l) => q + l.quantity, 0), 0);
       const custs = new Set(inB.map((x) => x.customer).filter(Boolean)).size;
@@ -341,7 +341,7 @@ export function ReportingPage() {
   // Date range metrics for Sales Report
   const salesParsedRange = useMemo(() => parseRange(salesRange), [salesRange]);
   const salesFiltered = useMemo(() => {
-    return sales.filter((s) => s.at >= salesParsedRange.start.getTime() && s.at <= salesParsedRange.end.getTime());
+    return sales.filter((s) => s.status !== 'Returned' && s.at >= salesParsedRange.start.getTime() && s.at <= salesParsedRange.end.getTime());
   }, [sales, salesParsedRange]);
 
   const salesMetrics = useMemo(() => {
@@ -369,7 +369,7 @@ export function ReportingPage() {
   // Date range metrics for Payment Report
   const payParsedRange = useMemo(() => parseRange(payRange), [payRange]);
   const payFiltered = useMemo(() => {
-    return sales.filter((s) => s.at >= payParsedRange.start.getTime() && s.at <= payParsedRange.end.getTime());
+    return sales.filter((s) => s.status !== 'Returned' && s.at >= payParsedRange.start.getTime() && s.at <= payParsedRange.end.getTime());
   }, [sales, payParsedRange]);
 
   const payMetrics = useMemo(() => {
@@ -392,7 +392,7 @@ export function ReportingPage() {
   const invFiltered = useMemo(() => {
     const start = new Date(2025, 6, 1).getTime();
     const end = new Date(2025, 6, 31, 23, 59, 59, 999).getTime();
-    return sales.filter((s) => s.at >= start && s.at <= end);
+    return sales.filter((s) => s.status !== 'Returned' && s.at >= start && s.at <= end);
   }, [sales]);
 
   const invProducts = useProducts((s) => s.products);
@@ -542,10 +542,28 @@ export function ReportingPage() {
   const creditCustomers = customers.filter((c) => c.storeCreditMinor > 0);
   const creditTotal = customers.reduce((a, c) => a + c.storeCreditMinor, 0);
 
-  // Top sales people: sales grouped by who rang them up.
+  // Sales that fall inside the selected dashboard period (Day/Week/Month at the
+  // chosen date), excluding returned sales. The "Products sold" and "Top sales
+  // people" tables below reflect this window — not the entire sales history.
+  const periodSales = useMemo(() => {
+    const s0 = (() => {
+      const d = new Date(dashDate);
+      d.setHours(0, 0, 0, 0);
+      if (view === 'Week') d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // Monday
+      else if (view === 'Month') return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+      return d.getTime();
+    })();
+    const s1 =
+      view === 'Day' ? s0 + DAY_MS
+      : view === 'Week' ? s0 + 7 * DAY_MS
+      : new Date(new Date(s0).getFullYear(), new Date(s0).getMonth() + 1, 1).getTime();
+    return sales.filter((s) => s.status !== 'Returned' && s.at >= s0 && s.at < s1);
+  }, [sales, view, dashDate]);
+
+  // Top sales people for the selected period, grouped by who rang them up.
   const salesPeople = useMemo(() => {
     const m = new Map<string, { rev: number; count: number; items: number }>();
-    for (const s of sales) {
+    for (const s of periodSales) {
       const key = s.soldBy ?? 'Staff';
       const cur = m.get(key) ?? { rev: 0, count: 0, items: 0 };
       cur.rev += s.totalMinor;
@@ -554,13 +572,14 @@ export function ReportingPage() {
       m.set(key, cur);
     }
     return [...m.entries()].sort((a, b) => b[1].rev - a[1].rev);
-  }, [sales]);
+  }, [periodSales]);
 
   // Per-product daily quantity over the last 7 days (for the Trend sparkline).
   const trendMap = useMemo(() => {
     const t0 = startOfDay(Date.now());
     const m = new Map<string, number[]>();
     for (const sale of sales) {
+      if (sale.status === 'Returned') continue;
       const daysAgo = Math.round((t0 - startOfDay(sale.at)) / DAY_MS);
       if (daysAgo < 0 || daysAgo > 6) continue;
       for (const l of sale.lines) {
@@ -573,7 +592,7 @@ export function ReportingPage() {
   }, [sales]);
 
   const topMap = new Map<string, { qty: number; rev: number }>();
-  for (const sale of sales)
+  for (const sale of periodSales)
     for (const l of sale.lines) {
       const cur = topMap.get(l.name) ?? { qty: 0, rev: 0 };
       topMap.set(l.name, { qty: cur.qty + l.quantity, rev: cur.rev + l.unitPriceMinor * l.quantity });

@@ -365,7 +365,12 @@ export function InventoryPage() {
                         <span className="r">{txQty(o)}</span>
                         <span className="r">
                           {(o.status === 'Open' || o.status === 'Sent') && (
-                            <span className="rlink" onClick={() => receiveTx(o.id)}>
+                            <span
+                              className="rlink"
+                              onClick={() => {
+                                if (window.confirm(`Receive ${o.number} — add ${txQty(o)} units into ${o.to}? This updates stock on hand.`)) receiveTx(o.id);
+                              }}
+                            >
                               Receive
                             </span>
                           )}

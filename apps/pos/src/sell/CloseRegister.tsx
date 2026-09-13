@@ -61,7 +61,7 @@ export function CloseRegister() {
   const diffCls = (d: number) => (d === 0 ? '' : d < 0 ? 'neg' : 'pos');
   const time = (t: number) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
-  const doClose = () =>
+  const doClose = () => {
     closeRegister({
       countedMinor: totalCounted,
       expectedMinor: totalExpected,
@@ -69,6 +69,12 @@ export function CloseRegister() {
       note: closeNote,
       by: userName,
     });
+    // Start the next closure with an empty count sheet.
+    setQty({});
+    setCustom('');
+    setCounted({ closingFloat: '', cashToBank: '', loyalty: '', storeCredit: '', zelle: '', venmo: '' });
+    setCloseNote('');
+  };
 
   if (status === 'closed') {
     const last = closures[0];

@@ -61,7 +61,14 @@ export const useQuotes = create<QuotesState>()(
       syncFromDb: async () => {
         const rows = await dbQuotes.list();
         if (!rows.length) return;
-        set({ quotes: rows.map(fromRow) });
+        const quotes = rows.map(fromRow);
+        // Advance the counter past every quote number already in the cloud so a
+        // fresh browser can't reissue an existing "Q-####" (num is unique).
+        const maxNum = quotes.reduce((max, q) => {
+          const n = parseInt(q.num.replace(/[^0-9]/g, ''), 10);
+          return Number.isFinite(n) ? Math.max(max, n) : max;
+        }, 1042);
+        set((s) => ({ quotes, quoteSeq: Math.max(s.quoteSeq, maxNum + 1) }));
       },
 
       addQuote: (q) => {

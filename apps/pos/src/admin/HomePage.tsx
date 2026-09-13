@@ -26,6 +26,7 @@ const startOfDay = (t: number): number => {
 const hourlyRevenue = (sales: CompletedSale[], dayStart: number): number[] => {
   const buckets = CHART_HOURS.map(() => 0);
   for (const s of sales) {
+    if (s.status === 'Returned') continue;
     if (s.at < dayStart || s.at >= dayStart + DAY_MS) continue;
     const h = new Date(s.at).getHours();
     const idx = Math.min(Math.max(h - CHART_HOURS[0]!, 0), buckets.length - 1);
@@ -117,7 +118,9 @@ export function HomePage() {
     return { periodStart: monthStart, prevStart: prevMonthStart, compLabel: 'last month' };
   }, [period, now, todayStart]);
 
-  const stats = (list: CompletedSale[]) => {
+  // Returned sales carry no revenue; the caller still sees them via returnsCount.
+  const stats = (all: CompletedSale[]) => {
+    const list = all.filter((x) => x.status !== 'Returned');
     const revenue = list.reduce((s, x) => s + x.totalMinor, 0);
     const count = list.length;
     const items = list.reduce((s, x) => s + x.lines.reduce((a, l) => a + l.quantity, 0), 0);

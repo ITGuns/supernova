@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { dbUsers } from '../lib/db';
+import { hashPassword, isHashed, verifyPassword } from '../lib/password';
 
 // Single source of truth for staff/users, shared across Setup → Users,
 // Reporting → User reports, the profile drawer, and login authentication.
@@ -79,7 +80,8 @@ interface UserState {
   updateUser: (id: string, patch: Partial<AppUser>) => void;
   deleteUser: (id: string) => void;
   toggleUser: (id: string) => void;
-  authenticate: (email: string, password: string) => AppUser | null;
+  /** Resolves the user on a correct email + password; null otherwise. */
+  authenticate: (email: string, password: string) => Promise<AppUser | null>;
   setCurrentUser: (id: string) => void;
   clockIn: () => void;
   clockOut: () => void;
@@ -133,9 +135,13 @@ export const useUsers = create<UserState>()(
         if (u) dbUsers.upsert(toRow(u));
       },
 
-      authenticate: (email, password) => {
+      authenticate: async (email, password) => {
         const e = email.trim().toLowerCase();
-        return get().users.find((u) => u.enabled && u.email.toLowerCase() === e && u.password === password) ?? null;
+        const user = get().users.find((u) => u.enabled && u.email.toLowerCase() === e);
+        if (!user || !(await verifyPassword(password, user.password))) return null;
+        // Legacy plaintext record: upgrade it to a hash now that we know the password.
+        if (!isHashed(user.password)) get().updateUser(user.id, { password: await hashPassword(password) });
+        return user;
       },
 
       setCurrentUser: (id) => set({ currentUserId: id }),

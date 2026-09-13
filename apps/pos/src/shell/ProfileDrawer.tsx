@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fmt } from '../lib/format';
+import { verifyPassword } from '../lib/password';
 import { useCart } from '../store/cartStore';
 import { useSecurity } from '../store/securityStore';
 import { useUsers } from '../store/userStore';
@@ -32,9 +33,9 @@ export function ProfileDrawer({ onClose }: { onClose: () => void }) {
   const doSwitch = () => {
     if (nextUser) setCurrentUser(nextUser.id);
   };
-  const confirmSwitch = () => {
+  const confirmSwitch = async () => {
     // Switching requires the password of the user being switched to.
-    if (nextUser && pin === nextUser.password) {
+    if (nextUser && (await verifyPassword(pin, nextUser.password))) {
       doSwitch();
       setAskAuth(false);
       setPin('');
