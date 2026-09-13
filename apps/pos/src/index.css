@@ -6496,3 +6496,25 @@ input {
   .login-body { grid-template-columns: 1fr; }
   .login-right { display: none; }
 }
+
+/* Real footage behind the login. Fades in over the drawn nova once the first
+   frame is ready; the shade keeps the card and tagline legible on any frame. */
+.login-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 900ms ease;
+  pointer-events: none;
+}
+.login-video.is-ready { opacity: 1; }
+.login-shade {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(5, 6, 15, 0.55) 0%, rgba(5, 6, 15, 0.15) 45%, rgba(5, 6, 15, 0) 70%),
+    linear-gradient(0deg, rgba(5, 6, 15, 0.6) 0%, rgba(5, 6, 15, 0) 40%);
+}

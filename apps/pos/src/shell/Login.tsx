@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useUsers } from '../store/userStore';
 import { NovaLogo } from './NovaLogo';
@@ -235,6 +235,70 @@ function LoginHero() {
   );
 }
 
+// ── Real footage layer ───────────────────────────────────────────────────────
+// Served from /nova.mp4 (apps/pos/public). The drawn nova above is the poster:
+// it shows until the first video frame is ready, stays if the file is missing
+// or fails, and is used instead of the video when the user prefers reduced
+// motion — so the login screen never depends on the video to look right.
+const VIDEO_SRC = '/nova.mp4';
+
+function useReducedMotion() {
+  const [reduced, setReduced] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const on = () => setReduced(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  return reduced;
+}
+
+function LoginBackdrop() {
+  const reduced = useReducedMotion();
+  const [state, setState] = useState<'loading' | 'playing' | 'failed'>('loading');
+  const [video, setVideo] = useState<HTMLVideoElement | null>(null);
+  const showVideo = !reduced && state !== 'failed';
+  const showDrawn = reduced || state !== 'playing';
+
+  // Chrome pauses silent video in background tabs to save power and does not
+  // resume it when the tab comes back — restart it ourselves.
+  useEffect(() => {
+    if (!video) return;
+    const resume = () => {
+      if (document.visibilityState === 'visible' && video.paused) void video.play().catch(() => {});
+    };
+    document.addEventListener('visibilitychange', resume);
+    return () => document.removeEventListener('visibilitychange', resume);
+  }, [video]);
+
+  return (
+    <>
+      {showDrawn && <LoginHero />}
+      {showVideo && (
+        <video
+          ref={setVideo}
+          className={`login-video ${state === 'playing' ? 'is-ready' : ''}`}
+          src={VIDEO_SRC}
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="auto"
+          disablePictureInPicture
+          aria-hidden="true"
+          // Only swap once frames are really moving, so a device that blocks
+          // autoplay keeps the drawn nova instead of a frozen first frame.
+          onPlaying={() => setState('playing')}
+          onError={() => setState('failed')}
+        />
+      )}
+      <div className="login-shade" aria-hidden="true" />
+    </>
+  );
+}
+
 export function Login() {
   const nav = useNavigate();
   // RequireUser records where an unauthenticated visitor was headed.
@@ -266,7 +330,7 @@ export function Login() {
         <span className="login-help">Help</span>
       </header>
       <div className="login-body">
-        <LoginHero />
+        <LoginBackdrop />
         <div className="login-left">
           <div className="login-card">
             <h1>Log in to Nova Retail</h1>
