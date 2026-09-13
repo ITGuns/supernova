@@ -33,8 +33,9 @@ export function CloseRegister() {
 
   const movementNet = movements.reduce((sum, m) => sum + (m.type === 'ADD' ? m.amountMinor : -m.amountMinor), 0);
 
-  const { cashReceived, venmoExpected } = useMemo(() => {
+  const { cashReceived, cashRefunded, venmoExpected } = useMemo(() => {
     let cash = 0;
+    let refunded = 0;
     let other = 0;
     const inSession = (t: number) => openedAt == null || t >= openedAt;
     for (const s of sales) {
@@ -43,7 +44,7 @@ export function CloseRegister() {
       // the original sale belongs to an earlier session.
       if (s.refundedAt != null && inSession(s.refundedAt)) {
         for (const t of s.refundTenders ?? []) {
-          if (t.method === 'CASH') cash -= t.amountMinor;
+          if (t.method === 'CASH') refunded += t.amountMinor;
           else other -= t.amountMinor;
         }
       }
@@ -54,9 +55,9 @@ export function CloseRegister() {
         else other += t.amountMinor;
       }
     }
-    return { cashReceived: cash, venmoExpected: other };
+    return { cashReceived: cash, cashRefunded: refunded, venmoExpected: other };
   }, [sales, openedAt]);
-  const cashExpected = openingFloatMinor + movementNet + cashReceived;
+  const cashExpected = openingFloatMinor + movementNet + cashReceived - cashRefunded;
 
   const num = (s: string) => Math.round(parseFloat(s || '0') * 100);
   const rows = [
@@ -176,6 +177,9 @@ export function CloseRegister() {
             <div className="cr-cm-sub"><span>Opening float</span><span className="r">{fmt(openingFloatMinor)}</span></div>
             <div className="cr-cm-sub"><span>Cash movements (net)</span><span className="r">{movementNet < 0 ? `-${fmt(-movementNet)}` : fmt(movementNet)}</span></div>
             <div className="cr-cm-sub"><span>Cash payments received</span><span className="r">{fmt(cashReceived)}</span></div>
+            {cashRefunded > 0 && (
+              <div className="cr-cm-sub"><span>Cash refunds</span><span className="r">-{fmt(cashRefunded)}</span></div>
+            )}
             <div className="cr-cm-sub"><span>Closing float</span><span className="r"><input type="number" step="0.01" value={counted.closingFloat} onChange={(e) => setCounted((c) => ({ ...c, closingFloat: e.target.value }))} placeholder="0.00" /></span></div>
             <div className="cr-cm-sub"><span>Cash to bank</span><span className="r"><input type="number" step="0.01" value={counted.cashToBank} onChange={(e) => setCounted((c) => ({ ...c, cashToBank: e.target.value }))} placeholder="0.00" /></span></div>
           </div>

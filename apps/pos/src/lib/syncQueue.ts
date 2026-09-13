@@ -132,10 +132,17 @@ export async function flush(): Promise<{ sent: number; left: number }> {
         save(ops);
         break; // still offline — keep order, try again later
       }
-      // Permanent: drop it so it can't block everything behind it, but say so.
-      reportDbError(`${op.scope} (queued replay dropped)`, error.message);
       ops = ops.slice(1);
       save(ops);
+      // A replayed insert that hits its own primary key means the original
+      // request reached the server but its response never came back (tab
+      // closed or reloaded mid-flight). The row is there — that's success.
+      if (op.kind === 'insert' && error.code === '23505') {
+        sent++;
+        continue;
+      }
+      // Permanent: drop it so it can't block everything behind it, but say so.
+      reportDbError(`${op.scope} (queued replay dropped)`, error.message);
     }
     return { sent, left: ops.length };
   } finally {
