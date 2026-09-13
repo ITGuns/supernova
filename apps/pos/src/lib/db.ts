@@ -75,9 +75,12 @@ export const dbSetup = {
 // ─── Users ───────────────────────────────────────────────────────────────────
 export const dbUsers = {
   async list() {
-    if (!ok()) return [];
+    if (!ok()) return null;
     const { data, error } = await supabase.from('users').select('*').order('created_at');
-    if (error) reportDbError('users.list', error.message);
+    if (error) {
+      reportDbError('users.list', error.message);
+      return null;
+    }
     return data ?? [];
   },
   upsert: (row: Row) => upsert('users', row),
@@ -87,9 +90,12 @@ export const dbUsers = {
 // ─── Catalog Meta (categories / brands / suppliers) ──────────────────────────
 export const dbCatalogMeta = {
   async list() {
-    if (!ok()) return [];
+    if (!ok()) return null;
     const { data, error } = await supabase.from('catalog_meta').select('*');
-    if (error) reportDbError('catalog_meta.list', error.message);
+    if (error) {
+      reportDbError('catalog_meta.list', error.message);
+      return null;
+    }
     return data ?? [];
   },
   upsert: (row: Row) => upsert('catalog_meta', row),
@@ -99,12 +105,15 @@ export const dbCatalogMeta = {
 // ─── Products ────────────────────────────────────────────────────────────────
 export const dbProducts = {
   async list() {
-    if (!ok()) return [];
+    if (!ok()) return null;
     const { data, error } = await supabase
       .from('products')
       .select('*')
       .order('created_at', { ascending: false });
-    if (error) reportDbError('products.list', error.message);
+    if (error) {
+      reportDbError('products.list', error.message);
+      return null;
+    }
     return data ?? [];
   },
   upsert: (row: Row) => upsert('products', row),
@@ -114,21 +123,27 @@ export const dbProducts = {
 // ─── Customers ───────────────────────────────────────────────────────────────
 export const dbCustomers = {
   async list() {
-    if (!ok()) return [];
+    if (!ok()) return null;
     const { data, error } = await supabase
       .from('customers')
       .select('*')
       .order('created_at', { ascending: false });
-    if (error) reportDbError('customers.list', error.message);
+    if (error) {
+      reportDbError('customers.list', error.message);
+      return null;
+    }
     return data ?? [];
   },
   upsert: (row: Row) => upsert('customers', row),
   del: (id: string) => delBy('customers', 'id', id),
   // Customer groups
   async listGroups() {
-    if (!ok()) return [];
+    if (!ok()) return null;
     const { data, error } = await supabase.from('customer_groups').select('name').order('id');
-    if (error) reportDbError('customer_groups.list', error.message);
+    if (error) {
+      reportDbError('customer_groups.list', error.message);
+      return null;
+    }
     return (data ?? []).map((r: { name: string }) => r.name);
   },
   addGroup: (name: string) => insert('customer_groups', { name }),
@@ -138,12 +153,15 @@ export const dbCustomers = {
 // ─── Sales ───────────────────────────────────────────────────────────────────
 export const dbSales = {
   async list() {
-    if (!ok()) return [];
+    if (!ok()) return null;
     const { data, error } = await supabase
       .from('sales')
       .select('*')
       .order('sold_at', { ascending: false });
-    if (error) reportDbError('sales.list', error.message);
+    if (error) {
+      reportDbError('sales.list', error.message);
+      return null;
+    }
     return data ?? [];
   },
   insert: (row: Row) => insert('sales', row),
@@ -154,12 +172,15 @@ export const dbSales = {
 // ─── Parked Sales ─────────────────────────────────────────────────────────────
 export const dbParked = {
   async list() {
-    if (!ok()) return [];
+    if (!ok()) return null;
     const { data, error } = await supabase
       .from('parked_sales')
       .select('*')
       .order('parked_at', { ascending: false });
-    if (error) reportDbError('parked_sales.list', error.message);
+    if (error) {
+      reportDbError('parked_sales.list', error.message);
+      return null;
+    }
     return data ?? [];
   },
   insert: (row: Row) => insert('parked_sales', row),
@@ -169,12 +190,15 @@ export const dbParked = {
 // ─── Quotes ──────────────────────────────────────────────────────────────────
 export const dbQuotes = {
   async list() {
-    if (!ok()) return [];
+    if (!ok()) return null;
     const { data, error } = await supabase
       .from('quotes')
       .select('*')
       .order('created_at', { ascending: false });
-    if (error) reportDbError('quotes.list', error.message);
+    if (error) {
+      reportDbError('quotes.list', error.message);
+      return null;
+    }
     return data ?? [];
   },
   upsert: (row: Row) => upsert('quotes', row),
@@ -184,12 +208,15 @@ export const dbQuotes = {
 // ─── Stock Transactions ───────────────────────────────────────────────────────
 export const dbStockTx = {
   async list() {
-    if (!ok()) return [];
+    if (!ok()) return null;
     const { data, error } = await supabase
       .from('stock_transactions')
       .select('*')
       .order('created_at', { ascending: false });
-    if (error) reportDbError('stock_transactions.list', error.message);
+    if (error) {
+      reportDbError('stock_transactions.list', error.message);
+      return null;
+    }
     return data ?? [];
   },
   upsert: (row: Row) => upsert('stock_transactions', row),
@@ -199,12 +226,15 @@ export const dbStockTx = {
 // ─── Inventory Counts ────────────────────────────────────────────────────────
 export const dbInventoryCounts = {
   async list() {
-    if (!ok()) return [];
+    if (!ok()) return null;
     const { data, error } = await supabase
       .from('inventory_counts')
       .select('*')
       .order('created_at', { ascending: false });
-    if (error) reportDbError('inventory_counts.list', error.message);
+    if (error) {
+      reportDbError('inventory_counts.list', error.message);
+      return null;
+    }
     return data ?? [];
   },
   upsert: (row: Row) => upsert('inventory_counts', row),
@@ -258,9 +288,12 @@ export const dbSecurity = {
 // ─── Adjustment Reasons ───────────────────────────────────────────────────────
 export const dbAdjustmentReasons = {
   async list() {
-    if (!ok()) return [];
+    if (!ok()) return null;
     const { data, error } = await supabase.from('adjustment_reasons').select('*');
-    if (error) reportDbError('adjustment_reasons.list', error.message);
+    if (error) {
+      reportDbError('adjustment_reasons.list', error.message);
+      return null;
+    }
     return data ?? [];
   },
   upsert: (row: Row) => upsert('adjustment_reasons', row),

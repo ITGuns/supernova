@@ -60,7 +60,7 @@ export const useQuotes = create<QuotesState>()(
 
       syncFromDb: async () => {
         const rows = await dbQuotes.list();
-        if (!rows.length) return;
+        if (!rows) return; // request failed — keep cached quotes
         const quotes = rows.map(fromRow);
         // Advance the counter past every quote number already in the cloud so a
         // fresh browser can't reissue an existing "Q-####" (num is unique).

@@ -68,8 +68,8 @@ export const useProducts = create<ProductState>()(
 
       syncFromDb: async () => {
         const rows = await dbProducts.list();
-        if (!rows.length) return;
-        set({ products: rows.map(fromRow) });
+        if (!rows) return; // request failed — keep the cached catalog
+        set({ products: rows.map(fromRow) }); // [] is a real answer: no products
       },
 
       addProduct: (p) => {

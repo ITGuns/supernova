@@ -107,7 +107,7 @@ export const useInventory = create<InventoryState>()(
           dbStockTx.list(),
           dbInventoryCounts.list(),
         ]);
-        if (txRows.length || countRows.length) {
+        if (txRows && countRows) {
           set({
             transactions: txRows.map(rowToTx),
             counts: countRows.map(rowToCount),

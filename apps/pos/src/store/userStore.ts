@@ -100,7 +100,9 @@ export const useUsers = create<UserState>()(
 
       syncFromDb: async () => {
         const rows = await dbUsers.list();
-        if (!rows.length) return;
+        // null = request failed; [] = no accounts in the cloud. Either way keep
+        // the seeded admins so the store can always be logged into.
+        if (!rows || !rows.length) return;
         set({ users: rows.map(fromRow) });
       },
 

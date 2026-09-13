@@ -29,16 +29,27 @@ const uid = (): string =>
     ? crypto.randomUUID()
     : `id-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
 
+// Starter set for a store with no catalog metadata in the cloud yet.
+const DEFAULTS = {
+  categories: CATEGORIES.map((c) => ({ id: c.id, name: c.name })),
+  brands: [{ id: 'nova', name: 'Nova' }],
+  suppliers: [{ id: 'house', name: 'House' }],
+};
+
 export const useCatalogMeta = create<CatalogMetaState>()(
   persist(
     (set, get) => ({
-      categories: CATEGORIES.map((c) => ({ id: c.id, name: c.name })),
-      brands: [{ id: 'nova', name: 'Nova' }],
-      suppliers: [{ id: 'house', name: 'House' }],
+      ...DEFAULTS,
 
       syncFromDb: async () => {
         const rows = await dbCatalogMeta.list();
-        if (!rows.length) return;
+        if (!rows) return; // request failed — keep whatever we have
+        if (!rows.length) {
+          // Cloud is empty (fresh or wiped store): every device shows the
+          // same starter set rather than stale cached entries.
+          set(DEFAULTS);
+          return;
+        }
         const categories: MetaEntity[] = [];
         const brands: MetaEntity[] = [];
         const suppliers: MetaEntity[] = [];

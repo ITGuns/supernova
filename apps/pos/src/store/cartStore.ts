@@ -199,6 +199,7 @@ export const useCart = create<CartState>()(
       dbSales.list(),
       dbParked.list(),
     ]);
+    if (!salesRows || !parkedRows) return; // request failed — keep cached history
     const sales = salesRows.map(rowToSale);
     const parked = parkedRows.map(rowToParked);
     if (salesRows[0]) hasRefundColumns = 'refund_tenders' in salesRows[0];
@@ -210,7 +211,8 @@ export const useCart = create<CartState>()(
       ...parked.map((p) => orderNumToInt(p.label)),
     );
     set((state) => ({
-      ...(sales.length || parked.length ? { sales, parked } : {}),
+      sales,
+      parked,
       orderSeq: Math.max(state.orderSeq, maxNum - 1000 + 1),
     }));
   },

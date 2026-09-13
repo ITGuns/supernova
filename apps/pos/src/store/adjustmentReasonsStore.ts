@@ -29,7 +29,7 @@ export const useAdjustmentReasons = create<AdjustmentReasonsState>()(
 
       syncFromDb: async () => {
         const rows = await dbAdjustmentReasons.list();
-        if (!rows.length) return;
+        if (!rows) return; // request failed — keep cached reasons
         set({
           reasons: rows.map((r) => ({
             id: r.id as string,

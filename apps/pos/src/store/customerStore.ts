@@ -62,8 +62,9 @@ export const useCustomers = create<CustomerState>()(
           dbCustomers.list(),
           dbCustomers.listGroups(),
         ]);
-        if (rows.length) set({ customers: rows.map(fromRow) });
-        if (groups.length) set({ groups });
+        if (rows) set({ customers: rows.map(fromRow) });
+        // "All Customers" must always exist, so an empty cloud keeps the defaults.
+        if (groups && groups.length) set({ groups });
       },
 
       addCustomer: (c) => {
