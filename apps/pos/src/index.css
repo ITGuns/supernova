@@ -6364,3 +6364,8 @@ input {
   .rcpt-print-training { margin-top: 8px; text-align: center; font-weight: 800; letter-spacing: 1px; }
   .rcpt-print-foot { margin-top: 12px; text-align: center; font-size: 11px; }
 }
+.sync-toast.queued {
+  background: #14243b;
+  border-color: #3a6ea3;
+  color: #dbeafe;
+}

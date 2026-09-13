@@ -266,10 +266,14 @@ create or replace trigger register_sessions_updated_at
 
 -- ── Register Config ──────────────────────────────────────────
 create table if not exists register_config (
-  id              uuid primary key default uuid_generate_v4(),
-  name            text not null default 'Register 1',
-  training_mode   boolean not null default false,
-  updated_at      timestamptz not null default now()
+  id                 uuid primary key default uuid_generate_v4(),
+  name               text not null default 'Register 1',
+  training_mode      boolean not null default false,
+  -- Quick-key grids, shared by every device on this register.
+  layouts            jsonb not null default '[]',
+  current_layout_id  text,
+  quick_keys_enabled boolean not null default true,
+  updated_at         timestamptz not null default now()
 );
 create or replace trigger register_config_updated_at
   before update on register_config

@@ -4,6 +4,11 @@ import { dbRegisterConfig } from '../lib/db';
 
 // Per-register settings (training mode, quick keys and their layouts).
 // Drives the Sell register screen and the register Settings page.
+//
+// Quick-key layouts sync to register_config.layouts so every device sharing
+// this register shows the same grid. The column is feature-detected on load:
+// until the migration that adds it has run, layouts stay device-local and no
+// cloud write is attempted (so an older schema never produces error toasts).
 
 /** A product placed on a layout grid, with its per-key display overrides. */
 export interface QuickKey {
@@ -37,8 +42,10 @@ interface RegisterState {
   quickKeysEnabled: boolean;
   layouts: QuickKeyLayout[];
   currentLayoutId: string;
+  /** True once the cloud row is known to carry a `layouts` column. Not persisted. */
+  cloudLayouts: boolean;
 
-  /** Sync trainingMode from Supabase. */
+  /** Sync trainingMode (and layouts, when the column exists) from Supabase. */
   syncFromDb: () => Promise<void>;
   toggleTraining: () => void;
   toggleQuickKeys: () => void;
@@ -62,18 +69,47 @@ const uid = (): string =>
     ? crypto.randomUUID()
     : `id-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
 
+const DEFAULT_LAYOUTS: QuickKeyLayout[] = [{ id: 'default', name: 'Default layout', keys: [], keepFolderOpen: false }];
+
+// Set while applying cloud state so the save subscriber doesn't echo it back.
+let hydrating = false;
+
 export const useRegister = create<RegisterState>()(
   persist(
     (set, get) => ({
       trainingMode: false,
       quickKeysEnabled: true,
-      layouts: [{ id: 'default', name: 'Default layout', keys: [], keepFolderOpen: false }],
+      layouts: DEFAULT_LAYOUTS,
       currentLayoutId: 'default',
+      cloudLayouts: false,
 
       syncFromDb: async () => {
         const row = await dbRegisterConfig.get();
         if (!row) return;
-        set({ trainingMode: row.training_mode ?? false });
+        const hasLayoutsColumn = 'layouts' in row;
+        const cloud = Array.isArray(row.layouts) ? (row.layouts as QuickKeyLayout[]) : [];
+        hydrating = true;
+        try {
+          set({
+            trainingMode: row.training_mode ?? false,
+            cloudLayouts: hasLayoutsColumn,
+            ...(cloud.length
+              ? {
+                  layouts: cloud,
+                  currentLayoutId: cloud.some((l) => l.id === row.current_layout_id)
+                    ? (row.current_layout_id as string)
+                    : cloud[0]!.id,
+                  quickKeysEnabled: (row.quick_keys_enabled as boolean | null) ?? get().quickKeysEnabled,
+                }
+              : {}),
+          });
+        } finally {
+          hydrating = false;
+        }
+        // First device to load after the migration: promote its local grid so
+        // other devices don't start from an empty layout.
+        const local = get().layouts;
+        if (hasLayoutsColumn && !cloud.length && local.some((l) => l.keys.length)) saveLayouts(get());
       },
 
       toggleTraining: () => {
@@ -186,6 +222,12 @@ export const useRegister = create<RegisterState>()(
     {
       name: 'nova-register-v1',
       version: 2,
+      partialize: (s) => ({
+        trainingMode: s.trainingMode,
+        quickKeysEnabled: s.quickKeysEnabled,
+        layouts: s.layouts,
+        currentLayoutId: s.currentLayoutId,
+      }),
       // v1 layouts were { id, name } only — give them an empty grid.
       migrate: (persisted, version) => {
         type OldLayout = Partial<QuickKeyLayout> & { id: string; name: string };
@@ -202,3 +244,20 @@ export const useRegister = create<RegisterState>()(
     },
   ),
 );
+
+// ── Cloud sync for layouts ────────────────────────────────────────────────────
+const saveLayouts = (s: Pick<RegisterState, 'layouts' | 'currentLayoutId' | 'quickKeysEnabled'>) =>
+  dbRegisterConfig.save({
+    layouts: s.layouts,
+    current_layout_id: s.currentLayoutId,
+    quick_keys_enabled: s.quickKeysEnabled,
+  });
+
+// Drag-and-drop fires many moveKey() calls in a row; coalesce them into one write.
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+useRegister.subscribe((s, prev) => {
+  if (hydrating || !s.cloudLayouts) return;
+  if (s.layouts === prev.layouts && s.currentLayoutId === prev.currentLayoutId && s.quickKeysEnabled === prev.quickKeysEnabled) return;
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => saveLayouts(useRegister.getState()), 500);
+});

@@ -15,15 +15,18 @@ export interface DbErrorDetail {
   scope: string;
   /** Raw Supabase/PostgREST message. */
   message: string;
+  /** True when the write was kept in the retry queue and will be replayed. */
+  queued: boolean;
   at: number;
 }
 
-export function reportDbError(scope: string, message: string): void {
-  console.error(`[db] ${scope}`, message);
+export function reportDbError(scope: string, message: string, opts: { queued?: boolean } = {}): void {
+  const queued = opts.queued ?? false;
+  (queued ? console.warn : console.error)(`[db] ${scope}${queued ? ' (queued for retry)' : ''}`, message);
   if (typeof window === 'undefined') return;
   window.dispatchEvent(
     new CustomEvent<DbErrorDetail>(DB_ERROR_EVENT, {
-      detail: { scope, message, at: Date.now() },
+      detail: { scope, message, queued, at: Date.now() },
     }),
   );
 }

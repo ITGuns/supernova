@@ -5,6 +5,10 @@
  * Stores call these instead of touching supabase directly so all
  * SQL logic is co-located and easy to swap out later.
  *
+ * Reads report failures via reportDbError(). Writes go through
+ * syncQueue.write(): they run immediately, and if the failure is transient
+ * (offline, 5xx) the write is queued and replayed automatically.
+ *
  * Naming convention:
  *   db<Table>.list()    → SELECT *
  *   db<Table>.upsert()  → INSERT … ON CONFLICT DO UPDATE
@@ -15,6 +19,7 @@
 
 import { supabase, isSupabaseConfigured } from './supabase';
 import { reportDbError } from './syncErrors';
+import { write } from './syncQueue';
 
 // ─── Guard ───────────────────────────────────────────────────────────────────
 // Returns true + logs nothing when Supabase is ready.
@@ -26,6 +31,16 @@ const SETUP_ID      = '00000000-0000-0000-0000-000000000002';
 const SESSION_ID    = '00000000-0000-0000-0000-000000000003';
 const REGISTER_ID   = '00000000-0000-0000-0000-000000000004';
 const SECURITY_ID   = '00000000-0000-0000-0000-000000000005';
+
+type Row = Record<string, unknown>;
+
+// Shared write shapes so each table helper stays one line.
+const upsert = (table: string, row: Row) => write({ table, kind: 'upsert', payload: row, scope: `${table}.upsert` });
+const insert = (table: string, row: Row) => write({ table, kind: 'insert', payload: row, scope: `${table}.insert` });
+const delBy  = (table: string, col: string, val: string) =>
+  write({ table, kind: 'delete', match: { col, val }, scope: `${table}.del` });
+const saveSingleton = (table: string, id: string, patch: Row) =>
+  write({ table, kind: 'upsert', payload: { id, ...patch }, scope: `${table}.save` });
 
 // ─── Settings ────────────────────────────────────────────────────────────────
 export const dbSettings = {
@@ -39,13 +54,7 @@ export const dbSettings = {
     if (error) reportDbError('settings.get', error.message);
     return data ?? null;
   },
-  async save(patch: Record<string, unknown>) {
-    if (!ok()) return;
-    const { error } = await supabase
-      .from('settings')
-      .upsert({ id: SETTINGS_ID, ...patch });
-    if (error) reportDbError('settings.save', error.message);
-  },
+  save: (patch: Row) => saveSingleton('settings', SETTINGS_ID, patch),
 };
 
 // ─── Setup Config ────────────────────────────────────────────────────────────
@@ -60,13 +69,7 @@ export const dbSetup = {
     if (error) reportDbError('setup.get', error.message);
     return data ?? null;
   },
-  async save(patch: Record<string, unknown>) {
-    if (!ok()) return;
-    const { error } = await supabase
-      .from('setup_config')
-      .upsert({ id: SETUP_ID, ...patch });
-    if (error) reportDbError('setup.save', error.message);
-  },
+  save: (patch: Row) => saveSingleton('setup_config', SETUP_ID, patch),
 };
 
 // ─── Users ───────────────────────────────────────────────────────────────────
@@ -77,16 +80,8 @@ export const dbUsers = {
     if (error) reportDbError('users.list', error.message);
     return data ?? [];
   },
-  async upsert(row: Record<string, unknown>) {
-    if (!ok()) return;
-    const { error } = await supabase.from('users').upsert(row);
-    if (error) reportDbError('users.upsert', error.message);
-  },
-  async del(id: string) {
-    if (!ok()) return;
-    const { error } = await supabase.from('users').delete().eq('id', id);
-    if (error) reportDbError('users.del', error.message);
-  },
+  upsert: (row: Row) => upsert('users', row),
+  del: (id: string) => delBy('users', 'id', id),
 };
 
 // ─── Catalog Meta (categories / brands / suppliers) ──────────────────────────
@@ -97,16 +92,8 @@ export const dbCatalogMeta = {
     if (error) reportDbError('catalog_meta.list', error.message);
     return data ?? [];
   },
-  async upsert(row: Record<string, unknown>) {
-    if (!ok()) return;
-    const { error } = await supabase.from('catalog_meta').upsert(row);
-    if (error) reportDbError('catalog_meta.upsert', error.message);
-  },
-  async del(id: string) {
-    if (!ok()) return;
-    const { error } = await supabase.from('catalog_meta').delete().eq('id', id);
-    if (error) reportDbError('catalog_meta.del', error.message);
-  },
+  upsert: (row: Row) => upsert('catalog_meta', row),
+  del: (id: string) => delBy('catalog_meta', 'id', id),
 };
 
 // ─── Products ────────────────────────────────────────────────────────────────
@@ -120,16 +107,8 @@ export const dbProducts = {
     if (error) reportDbError('products.list', error.message);
     return data ?? [];
   },
-  async upsert(row: Record<string, unknown>) {
-    if (!ok()) return;
-    const { error } = await supabase.from('products').upsert(row);
-    if (error) reportDbError('products.upsert', error.message);
-  },
-  async del(id: string) {
-    if (!ok()) return;
-    const { error } = await supabase.from('products').delete().eq('id', id);
-    if (error) reportDbError('products.del', error.message);
-  },
+  upsert: (row: Row) => upsert('products', row),
+  del: (id: string) => delBy('products', 'id', id),
 };
 
 // ─── Customers ───────────────────────────────────────────────────────────────
@@ -143,16 +122,8 @@ export const dbCustomers = {
     if (error) reportDbError('customers.list', error.message);
     return data ?? [];
   },
-  async upsert(row: Record<string, unknown>) {
-    if (!ok()) return;
-    const { error } = await supabase.from('customers').upsert(row);
-    if (error) reportDbError('customers.upsert', error.message);
-  },
-  async del(id: string) {
-    if (!ok()) return;
-    const { error } = await supabase.from('customers').delete().eq('id', id);
-    if (error) reportDbError('customers.del', error.message);
-  },
+  upsert: (row: Row) => upsert('customers', row),
+  del: (id: string) => delBy('customers', 'id', id),
   // Customer groups
   async listGroups() {
     if (!ok()) return [];
@@ -160,16 +131,8 @@ export const dbCustomers = {
     if (error) reportDbError('customer_groups.list', error.message);
     return (data ?? []).map((r: { name: string }) => r.name);
   },
-  async addGroup(name: string) {
-    if (!ok()) return;
-    const { error } = await supabase.from('customer_groups').insert({ name });
-    if (error) reportDbError('customer_groups.add', error.message);
-  },
-  async delGroup(name: string) {
-    if (!ok()) return;
-    const { error } = await supabase.from('customer_groups').delete().eq('name', name);
-    if (error) reportDbError('customer_groups.del', error.message);
-  },
+  addGroup: (name: string) => insert('customer_groups', { name }),
+  delGroup: (name: string) => delBy('customer_groups', 'name', name),
 };
 
 // ─── Sales ───────────────────────────────────────────────────────────────────
@@ -183,19 +146,9 @@ export const dbSales = {
     if (error) reportDbError('sales.list', error.message);
     return data ?? [];
   },
-  async insert(row: Record<string, unknown>) {
-    if (!ok()) return;
-    const { error } = await supabase.from('sales').insert(row);
-    if (error) reportDbError('sales.insert', error.message);
-  },
-  async update(orderNumber: string, patch: Record<string, unknown>) {
-    if (!ok()) return;
-    const { error } = await supabase
-      .from('sales')
-      .update(patch)
-      .eq('order_number', orderNumber);
-    if (error) reportDbError('sales.update', error.message);
-  },
+  insert: (row: Row) => insert('sales', row),
+  update: (orderNumber: string, patch: Row) =>
+    write({ table: 'sales', kind: 'update', payload: patch, match: { col: 'order_number', val: orderNumber }, scope: 'sales.update' }),
 };
 
 // ─── Parked Sales ─────────────────────────────────────────────────────────────
@@ -209,16 +162,8 @@ export const dbParked = {
     if (error) reportDbError('parked_sales.list', error.message);
     return data ?? [];
   },
-  async insert(row: Record<string, unknown>) {
-    if (!ok()) return;
-    const { error } = await supabase.from('parked_sales').insert(row);
-    if (error) reportDbError('parked_sales.insert', error.message);
-  },
-  async del(id: string) {
-    if (!ok()) return;
-    const { error } = await supabase.from('parked_sales').delete().eq('id', id);
-    if (error) reportDbError('parked_sales.del', error.message);
-  },
+  insert: (row: Row) => insert('parked_sales', row),
+  del: (id: string) => delBy('parked_sales', 'id', id),
 };
 
 // ─── Quotes ──────────────────────────────────────────────────────────────────
@@ -232,16 +177,8 @@ export const dbQuotes = {
     if (error) reportDbError('quotes.list', error.message);
     return data ?? [];
   },
-  async upsert(row: Record<string, unknown>) {
-    if (!ok()) return;
-    const { error } = await supabase.from('quotes').upsert(row);
-    if (error) reportDbError('quotes.upsert', error.message);
-  },
-  async del(id: string) {
-    if (!ok()) return;
-    const { error } = await supabase.from('quotes').delete().eq('id', id);
-    if (error) reportDbError('quotes.del', error.message);
-  },
+  upsert: (row: Row) => upsert('quotes', row),
+  del: (id: string) => delBy('quotes', 'id', id),
 };
 
 // ─── Stock Transactions ───────────────────────────────────────────────────────
@@ -255,16 +192,8 @@ export const dbStockTx = {
     if (error) reportDbError('stock_transactions.list', error.message);
     return data ?? [];
   },
-  async upsert(row: Record<string, unknown>) {
-    if (!ok()) return;
-    const { error } = await supabase.from('stock_transactions').upsert(row);
-    if (error) reportDbError('stock_transactions.upsert', error.message);
-  },
-  async del(id: string) {
-    if (!ok()) return;
-    const { error } = await supabase.from('stock_transactions').delete().eq('id', id);
-    if (error) reportDbError('stock_transactions.del', error.message);
-  },
+  upsert: (row: Row) => upsert('stock_transactions', row),
+  del: (id: string) => delBy('stock_transactions', 'id', id),
 };
 
 // ─── Inventory Counts ────────────────────────────────────────────────────────
@@ -278,11 +207,7 @@ export const dbInventoryCounts = {
     if (error) reportDbError('inventory_counts.list', error.message);
     return data ?? [];
   },
-  async upsert(row: Record<string, unknown>) {
-    if (!ok()) return;
-    const { error } = await supabase.from('inventory_counts').upsert(row);
-    if (error) reportDbError('inventory_counts.upsert', error.message);
-  },
+  upsert: (row: Row) => upsert('inventory_counts', row),
 };
 
 // ─── Register Session ─────────────────────────────────────────────────────────
@@ -297,13 +222,7 @@ export const dbRegisterSession = {
     if (error) reportDbError('register_sessions.get', error.message);
     return data ?? null;
   },
-  async save(patch: Record<string, unknown>) {
-    if (!ok()) return;
-    const { error } = await supabase
-      .from('register_sessions')
-      .upsert({ id: SESSION_ID, ...patch });
-    if (error) reportDbError('register_sessions.save', error.message);
-  },
+  save: (patch: Row) => saveSingleton('register_sessions', SESSION_ID, patch),
 };
 
 // ─── Register Config ──────────────────────────────────────────────────────────
@@ -318,13 +237,7 @@ export const dbRegisterConfig = {
     if (error) reportDbError('register_config.get', error.message);
     return data ?? null;
   },
-  async save(patch: Record<string, unknown>) {
-    if (!ok()) return;
-    const { error } = await supabase
-      .from('register_config')
-      .upsert({ id: REGISTER_ID, ...patch });
-    if (error) reportDbError('register_config.save', error.message);
-  },
+  save: (patch: Row) => saveSingleton('register_config', REGISTER_ID, patch),
 };
 
 // ─── Security Config ──────────────────────────────────────────────────────────
@@ -339,13 +252,7 @@ export const dbSecurity = {
     if (error) reportDbError('security_config.get', error.message);
     return data ?? null;
   },
-  async save(patch: Record<string, unknown>) {
-    if (!ok()) return;
-    const { error } = await supabase
-      .from('security_config')
-      .upsert({ id: SECURITY_ID, ...patch });
-    if (error) reportDbError('security_config.save', error.message);
-  },
+  save: (patch: Row) => saveSingleton('security_config', SECURITY_ID, patch),
 };
 
 // ─── Adjustment Reasons ───────────────────────────────────────────────────────
@@ -356,14 +263,6 @@ export const dbAdjustmentReasons = {
     if (error) reportDbError('adjustment_reasons.list', error.message);
     return data ?? [];
   },
-  async upsert(row: Record<string, unknown>) {
-    if (!ok()) return;
-    const { error } = await supabase.from('adjustment_reasons').upsert(row);
-    if (error) reportDbError('adjustment_reasons.upsert', error.message);
-  },
-  async del(id: string) {
-    if (!ok()) return;
-    const { error } = await supabase.from('adjustment_reasons').delete().eq('id', id);
-    if (error) reportDbError('adjustment_reasons.del', error.message);
-  },
+  upsert: (row: Row) => upsert('adjustment_reasons', row),
+  del: (id: string) => delBy('adjustment_reasons', 'id', id),
 };

@@ -20,6 +20,7 @@ import { useRegister } from './store/registerStore';
 import { useQuotes } from './store/quotesStore';
 import { useCatalogMeta } from './store/catalogMetaStore';
 import { useAdjustmentReasons } from './store/adjustmentReasonsStore';
+import { startSyncQueue } from './lib/syncQueue';
 
 async function bootstrapDb() {
   try {
@@ -47,6 +48,8 @@ if (!rootEl) throw new Error('Root element #root not found');
 
 // Bootstrap first, then mount. Both happen quickly (<200 ms on a good connection).
 bootstrapDb().finally(() => {
+  // Replay any writes that failed while offline, now and on every reconnect.
+  startSyncQueue();
   ReactDOM.createRoot(rootEl).render(
     <React.StrictMode>
       <BrowserRouter>

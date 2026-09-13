@@ -14,8 +14,9 @@ const humanize = (d: DbErrorDetail): string => {
 
 /**
  * Bottom-center toast shown whenever a Supabase call fails. The local change
- * has already been applied, so the message is explicit that it did NOT reach
- * the cloud rather than implying the whole action failed.
+ * has already been applied, so the message is explicit about what happens
+ * next: queued writes will sync themselves; permanent failures did NOT reach
+ * the cloud and need attention.
  */
 export function SyncToast() {
   const [err, setErr] = useState<DbErrorDetail | null>(null);
@@ -34,10 +35,14 @@ export function SyncToast() {
 
   if (!err) return null;
   return (
-    <div className="sync-toast" role="alert">
-      <span className="sync-toast-ic">⚠</span>
+    <div className={`sync-toast ${err.queued ? 'queued' : ''}`} role="alert">
+      <span className="sync-toast-ic">{err.queued ? '⏳' : '⚠'}</span>
       <span className="sync-toast-body">
-        <b>Not saved to the cloud</b> — {humanize(err)}
+        {err.queued ? (
+          <><b>Saved on this device</b> — no connection right now; it will sync to the cloud automatically.</>
+        ) : (
+          <><b>Not saved to the cloud</b> — {humanize(err)}</>
+        )}
         <span className="sync-toast-scope">{err.scope}</span>
       </span>
       <button className="sync-toast-x" onClick={() => setErr(null)} aria-label="Dismiss">×</button>
