@@ -54,7 +54,26 @@ export interface CompletedSale {
   note?: string;
   soldBy?: string;
   status?: 'Completed' | 'Returned';
+  /** What went back to the customer on return — one entry per original method. */
+  refundTenders?: Tender[];
+  refundedAt?: number;
 }
+
+/**
+ * Refund for a full return: each method gets back what it actually paid.
+ * Cash is net of the change handed over at the sale, so the refund total
+ * always equals the sale total.
+ */
+export const refundFor = (sale: CompletedSale): Tender[] => {
+  const paid = (m: TenderMethod) =>
+    sale.tenders.filter((t) => t.method === m).reduce((a, t) => a + t.amountMinor, 0);
+  const cash = paid('CASH') - sale.changeMinor;
+  const card = paid('CARD');
+  const out: Tender[] = [];
+  if (cash > 0) out.push({ id: uid(), method: 'CASH', amountMinor: cash });
+  if (card > 0) out.push({ id: uid(), method: 'CARD', amountMinor: card });
+  return out;
+};
 
 interface CartState {
   lines: CartLine[];
@@ -94,6 +113,11 @@ const uid = (): string =>
 
 const orderNumber = (seq: number): string => `#${1000 + seq}`;
 
+// Whether the cloud `sales` table has the refund columns from migration 0004.
+// Detected from the first synced row so a return on an older schema still
+// persists its status instead of failing the whole update.
+let hasRefundColumns = true;
+
 /** Parse the numeric part of an order label like "#1002" → 1002. */
 const orderNumToInt = (label: string): number => {
   const n = parseInt(label.replace(/[^0-9]/g, ''), 10);
@@ -113,6 +137,11 @@ const saleToRow = (s: CompletedSale): Record<string, unknown> => ({
   note: s.note ?? null,
   sold_by: s.soldBy ?? null,
   status: s.status ?? 'Completed',
+  // Only sent once a refund exists, so inserting a new sale never touches
+  // these columns and keeps working on a schema that predates migration 0004.
+  ...(s.refundedAt
+    ? { refund_tenders: s.refundTenders ?? [], refunded_at: new Date(s.refundedAt).toISOString() }
+    : {}),
 });
 
 // Map a DB sales row back to CompletedSale.
@@ -128,6 +157,8 @@ const rowToSale = (r: Record<string, unknown>): CompletedSale => ({
   note: r.note as string | undefined,
   soldBy: r.sold_by as string | undefined,
   status: r.status as CompletedSale['status'],
+  refundTenders: (r.refund_tenders as Tender[] | null) ?? [],
+  refundedAt: r.refunded_at ? new Date(r.refunded_at as string).getTime() : undefined,
 });
 
 // Map a ParkedSale to the parked_sales table row.
@@ -170,6 +201,7 @@ export const useCart = create<CartState>()(
     ]);
     const sales = salesRows.map(rowToSale);
     const parked = parkedRows.map(rowToParked);
+    if (salesRows[0]) hasRefundColumns = 'refund_tenders' in salesRows[0];
     // Advance the order counter past every number already in the cloud so a
     // fresh browser (empty localStorage) can never reissue an existing number.
     const maxNum = Math.max(
@@ -327,11 +359,18 @@ export const useCart = create<CartState>()(
       }
     }
 
-    dbSales.update(orderNo, { status: 'Returned' });
+    const refundTenders = refundFor(sale);
+    const refundedAt = Date.now();
+    dbSales.update(orderNo, {
+      status: 'Returned',
+      ...(hasRefundColumns
+        ? { refund_tenders: refundTenders, refunded_at: new Date(refundedAt).toISOString() }
+        : {}),
+    });
 
     set({
       sales: state.sales.map((s) =>
-        s.orderNumber === orderNo ? { ...s, status: 'Returned' as const } : s,
+        s.orderNumber === orderNo ? { ...s, status: 'Returned' as const, refundTenders, refundedAt } : s,
       ),
     });
   },

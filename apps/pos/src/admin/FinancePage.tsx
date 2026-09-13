@@ -13,6 +13,7 @@ export function FinancePage() {
   const sales = useCart((s) => s.sales).filter((s) => !s.training);
   const movements = useRegisterSession((s) => s.movements);
   const openingFloat = useRegisterSession((s) => s.openingFloatMinor);
+  const openedAt = useRegisterSession((s) => s.openedAt);
   const regStatus = useRegisterSession((s) => s.status);
 
   const now = Date.now();
@@ -33,11 +34,29 @@ export function FinancePage() {
       else card += t.amountMinor;
     }
   const changeGiven = sales.reduce((a, s) => a + s.changeMinor, 0);
+  let cashRefunded = 0;
+  let cardRefunded = 0;
+  for (const s of sales)
+    for (const t of s.refundTenders ?? []) {
+      if (t.method === 'CASH') cashRefunded += t.amountMinor;
+      else cardRefunded += t.amountMinor;
+    }
   const netMovements = movements.reduce((a, m) => a + (m.type === 'ADD' ? m.amountMinor : -m.amountMinor), 0);
-  const till = openingFloat + netMovements + sales.filter((s) => s.tenders.some((t) => t.method === 'CASH')).reduce(
-    (a, s) => a + s.tenders.filter((t) => t.method === 'CASH').reduce((x, t) => x + t.amountMinor, 0) - s.changeMinor,
-    0,
-  );
+  // Cash in the drawer right now: this session's float, movements, cash
+  // taken (net of change) and cash handed back as refunds. Earlier sessions
+  // were banked at their closure, so only this session's activity counts.
+  const inSession = (t: number) => openedAt == null || t >= openedAt;
+  const till =
+    openingFloat +
+    netMovements +
+    sales.filter((s) => inSession(s.at)).reduce(
+      (a, s) => a + s.tenders.filter((t) => t.method === 'CASH').reduce((x, t) => x + t.amountMinor, 0) - s.changeMinor,
+      0,
+    ) -
+    sales.filter((s) => s.refundedAt != null && inSession(s.refundedAt)).reduce(
+      (a, s) => a + (s.refundTenders ?? []).filter((t) => t.method === 'CASH').reduce((x, t) => x + t.amountMinor, 0),
+      0,
+    );
 
   return (
     <main className="admin-main">
@@ -85,9 +104,15 @@ export function FinancePage() {
             <span>Card</span>
             <span className="r">{fmt(card)}</span>
           </div>
+          {(cashRefunded > 0 || cardRefunded > 0) && (
+            <div className="finc-row">
+              <span>Refunded (cash {fmt(cashRefunded)} · card {fmt(cardRefunded)})</span>
+              <span className="r">−{fmt(cashRefunded + cardRefunded)}</span>
+            </div>
+          )}
           <div className="finc-row">
-            <span>Total</span>
-            <span className="r">{fmt(Math.max(0, cash - changeGiven) + card)}</span>
+            <span>Net collected</span>
+            <span className="r">{fmt(Math.max(0, cash - changeGiven) + card - cashRefunded - cardRefunded)}</span>
           </div>
         </div>
       </div>

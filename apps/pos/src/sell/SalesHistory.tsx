@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { fmt } from '../lib/format';
-import { useCart } from '../store/cartStore';
+import { refundFor, useCart, type Tender } from '../store/cartStore';
 import { useSetup } from '../store/setupStore';
 import { useUsers } from '../store/userStore';
 import { BagClock } from '../admin/illustrations';
@@ -22,7 +22,12 @@ interface HSale {
   training: boolean;
   methods: string[];
   lines: { name: string; qty: number; priceMinor: number }[];
+  /** What a return would (or did) hand back, per tender method. */
+  refund: Tender[];
+  refundedAt?: number;
 }
+
+const tenderLabel = (m: Tender['method']) => (m === 'CASH' ? 'Cash' : 'Card');
 
 const initials = (n: string) => n.split(' ').map((s) => s.charAt(0)).join('').slice(0, 2).toUpperCase();
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -71,6 +76,8 @@ export function SalesHistory() {
     training: !!s.training,
     methods: s.tenders.map((t) => t.method),
     lines: s.lines.map((l) => ({ name: l.name, qty: l.quantity, priceMinor: l.unitPriceMinor })),
+    refund: s.status === 'Returned' ? (s.refundTenders ?? []) : refundFor(s),
+    refundedAt: s.refundedAt,
   }));
 
   const filtered = allSales.filter((s) => {
@@ -236,6 +243,15 @@ export function SalesHistory() {
                             <span className="r">{fmt(l.priceMinor * l.qty)}</span>
                           </div>
                         ))}
+                        {s.status === 'Returned' && s.refund.length > 0 && (
+                          <div className="sh-line sh-refund">
+                            <span>
+                              Refunded{s.refundedAt ? ` ${new Date(s.refundedAt).toLocaleString()}` : ''} —{' '}
+                              {s.refund.map((t) => `${tenderLabel(t.method)} ${fmt(t.amountMinor)}`).join(' · ')}
+                            </span>
+                            <span className="r">−{fmt(s.refund.reduce((a, t) => a + t.amountMinor, 0))}</span>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -267,9 +283,16 @@ export function SalesHistory() {
                 </div>
                 <div className="pm-totals">
                   <div className="dtrow pm-total"><span>Sale total</span><span>{fmt(confirmReturn.totalMinor)}</span></div>
+                  {confirmReturn.refund.map((t) => (
+                    <div key={t.id} className="dtrow disc">
+                      <span>Refund to {tenderLabel(t.method).toLowerCase()}</span>
+                      <span>−{fmt(t.amountMinor)}</span>
+                    </div>
+                  ))}
                 </div>
                 <p className="sh-confirm-hint">
-                  This marks the sale as returned, puts the items back into stock and removes {fmt(confirmReturn.totalMinor)} from reported revenue. It can’t be undone.
+                  This marks the sale as returned, puts the items back into stock, refunds {fmt(confirmReturn.totalMinor)} to the original payment method{confirmReturn.refund.length > 1 ? 's' : ''} and removes it from reported revenue.
+                  {confirmReturn.refund.some((t) => t.method === 'CASH') && ' Hand the cash refund to the customer from the till.'} It can’t be undone.
                 </p>
               </div>
             </div>

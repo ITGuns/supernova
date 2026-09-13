@@ -36,9 +36,18 @@ export function CloseRegister() {
   const { cashReceived, venmoExpected } = useMemo(() => {
     let cash = 0;
     let other = 0;
+    const inSession = (t: number) => openedAt == null || t >= openedAt;
     for (const s of sales) {
       if (s.training) continue;
-      if (openedAt != null && s.at < openedAt) continue;
+      // Refunds leave the drawer in the session they were issued, even when
+      // the original sale belongs to an earlier session.
+      if (s.refundedAt != null && inSession(s.refundedAt)) {
+        for (const t of s.refundTenders ?? []) {
+          if (t.method === 'CASH') cash -= t.amountMinor;
+          else other -= t.amountMinor;
+        }
+      }
+      if (!inSession(s.at)) continue;
       cash -= s.changeMinor;
       for (const t of s.tenders) {
         if (t.method === 'CASH') cash += t.amountMinor;

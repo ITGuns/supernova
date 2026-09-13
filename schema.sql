@@ -202,6 +202,9 @@ create table if not exists sales (
   note            text,
   sold_by         text,
   status          text not null default 'Completed',
+  -- Set on return: what was refunded, per original tender method.
+  refund_tenders  jsonb not null default '[]',
+  refunded_at     timestamptz,
   created_at      timestamptz not null default now()
 );
 

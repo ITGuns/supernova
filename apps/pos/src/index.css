@@ -6369,3 +6369,9 @@ input {
   border-color: #3a6ea3;
   color: #dbeafe;
 }
+.sh-line.sh-refund {
+  color: #f0a8a8;
+  border-top: 1px dashed var(--line);
+  margin-top: 6px;
+  padding-top: 6px;
+}
