@@ -66,7 +66,7 @@ const fromRow = (r: Record<string, unknown>): AppUser => ({
 
 const INIT: AppUser[] = [
   { id: 'u-owner', name: 'Alex Kim', email: 'alex@nova.local', role: 'Account owner, Admin', password: 'alex1234', enabled: true, owner: true, av: '#4b3df5', last: 'just now' },
-  { id: 'u-jade', name: 'Jade Tatom', email: 'jade.tatom@nova.local', role: 'Admin', password: 'jade1234', enabled: true, av: '#7c3aed', last: 'just now' },
+  { id: 'u-jade', name: 'Jade Tatom', email: 'jade.savage@nova.local', role: 'Admin', password: 'jade1234', enabled: true, av: '#7c3aed', last: 'just now' },
 ];
 
 interface UserState {
