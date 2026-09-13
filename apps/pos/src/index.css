@@ -6087,7 +6087,7 @@ input {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #eef0f4;
+  background: #05060f;
 }
 .login-top {
   height: 58px;
@@ -6240,17 +6240,24 @@ input {
 .login-btn:hover {
   background: #3f32e0;
 }
+/* Right column holds only the tagline; the space scene sits behind both
+   columns as a full-bleed SVG (.login-hero). */
 .login-right {
-  background: #3a41f0;
+  position: relative;
+  z-index: 1;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: flex-end;
+  justify-content: flex-start;
+  padding: 48px 56px;
   overflow: hidden;
+  pointer-events: none;
 }
 .login-hero {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
-  max-height: 92vh;
+  display: block;
 }
 @media (max-width: 900px) {
   .login-body {
@@ -6374,4 +6381,118 @@ input {
   border-top: 1px dashed var(--line);
   margin-top: 6px;
   padding-top: 6px;
+}
+
+/* ---------- Login: outer-space nova hero ---------- */
+.login-top {
+  background: #05060f;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.login-body {
+  position: relative;
+}
+.login-left {
+  position: relative;
+  z-index: 1;
+}
+.login-card {
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+.login-tagline {
+  color: #e8e6ff;
+  max-width: 440px;
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.6);
+}
+.login-tagline-k {
+  font-size: 12px;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: #a89cff;
+  font-weight: 700;
+}
+.login-tagline h2 {
+  font-size: 32px;
+  line-height: 1.12;
+  margin: 10px 0 10px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+}
+.login-tagline p {
+  color: rgba(232, 230, 255, 0.72);
+  font-size: 14.5px;
+  line-height: 1.55;
+  margin: 0;
+}
+
+/* Every animated SVG piece scales/rotates about its own centre. */
+.nv-neb, .nv-wave, .nv-halo, .nv-core, .nv-spikes, .nv-ember {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* Parallax starfield: each layer slides one viewport per loop. */
+@keyframes nv-drift { to { transform: translateX(-1000px); } }
+.nv-stars { animation: nv-drift linear infinite; }
+
+@keyframes nv-twinkle {
+  0%, 100% { opacity: var(--o); }
+  50% { opacity: calc(var(--o) * 0.2); }
+}
+.nv-tw { animation: nv-twinkle ease-in-out infinite; }
+
+/* Nebulae breathe and wander very slowly. */
+@keyframes nv-neb-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(28px, -18px) scale(1.06); }
+}
+.nv-neb { animation: nv-neb-drift 48s ease-in-out infinite; }
+.nv-neb-b { animation-duration: 64s; animation-delay: -20s; }
+.nv-neb-c { animation-duration: 56s; animation-delay: -35s; }
+
+/* The nova: breathing halo and core, rotating diffraction spikes,
+   expanding shockwaves, ejected embers. */
+@keyframes nv-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.92; }
+  50% { transform: scale(1.09); opacity: 1; }
+}
+.nv-halo { animation: nv-breathe 6s ease-in-out infinite; }
+.nv-core { animation: nv-breathe 3.6s ease-in-out infinite; }
+
+@keyframes nv-spin { to { transform: rotate(360deg); } }
+.nv-spikes-main { animation: nv-spin 160s linear infinite; }
+.nv-spikes-soft { animation: nv-spin 110s linear infinite reverse; opacity: 0.55; }
+
+@keyframes nv-wave {
+  0% { transform: scale(0.3); opacity: 0.85; }
+  100% { transform: scale(6); opacity: 0; }
+}
+.nv-wave { animation: nv-wave 8.1s ease-out infinite; }
+
+@keyframes nv-eject {
+  0% { transform: translate(0, 0) scale(1); opacity: 0; }
+  10% { opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) scale(0.1); opacity: 0; }
+}
+.nv-ember { animation: nv-eject ease-out infinite; }
+
+/* Shooting stars: streak, then rest. */
+@keyframes nv-shoot-1 {
+  0%, 100% { opacity: 0; transform: translate(120px, 110px) rotate(28deg); }
+  3% { opacity: 1; }
+  16% { opacity: 0; transform: translate(520px, 320px) rotate(28deg); }
+}
+.nv-shoot-1 { animation: nv-shoot-1 13s linear infinite; }
+@keyframes nv-shoot-2 {
+  0%, 100% { opacity: 0; transform: translate(960px, 60px) rotate(150deg); }
+  2% { opacity: 1; }
+  12% { opacity: 0; transform: translate(640px, 250px) rotate(150deg); }
+}
+.nv-shoot-2 { animation: nv-shoot-2 21s linear 6s infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .login-hero * { animation: none !important; }
+}
+@media (max-width: 860px) {
+  .login-body { grid-template-columns: 1fr; }
+  .login-right { display: none; }
 }

@@ -83,6 +83,8 @@ interface UserState {
   /** Resolves the user on a correct email + password; null otherwise. */
   authenticate: (email: string, password: string) => Promise<AppUser | null>;
   setCurrentUser: (id: string) => void;
+  /** End the session: no current user until someone logs in again. */
+  logout: () => void;
   clockIn: () => void;
   clockOut: () => void;
 }
@@ -91,7 +93,9 @@ export const useUsers = create<UserState>()(
   persist(
     (set, get) => ({
       users: INIT,
-      currentUserId: 'u-owner',
+      // Nobody is logged in until the login screen sets this; RequireUser
+      // sends visitors there.
+      currentUserId: null,
       clockedInAt: null,
 
       syncFromDb: async () => {
@@ -145,12 +149,15 @@ export const useUsers = create<UserState>()(
       },
 
       setCurrentUser: (id) => set({ currentUserId: id }),
+      logout: () => set({ currentUserId: null, clockedInAt: null }),
       clockIn: () => set({ clockedInAt: Date.now() }),
       clockOut: () => set({ clockedInAt: null }),
     }),
     {
       name: 'nova-users-v3',
-      partialize: (s) => ({ users: s.users, clockedInAt: s.clockedInAt }),
+      // currentUserId is persisted so a page refresh keeps the cashier who
+      // logged in, rather than silently reverting sales to the owner account.
+      partialize: (s) => ({ users: s.users, clockedInAt: s.clockedInAt, currentUserId: s.currentUserId }),
     },
   ),
 );

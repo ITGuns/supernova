@@ -9,6 +9,7 @@ import { ReportingPage } from './admin/ReportingPage';
 import { SetupPage } from './admin/SetupPage';
 import { AdminLayout } from './shell/AdminLayout';
 import { Login } from './shell/Login';
+import { RequireUser } from './shell/RequireUser';
 import { SyncToast } from './shell/SyncToast';
 import { CashManagement } from './sell/CashManagement';
 import { CloseRegister } from './sell/CloseRegister';
@@ -28,6 +29,7 @@ export function App() {
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="/login" element={<Login />} />
 
+      <Route element={<RequireUser />}>
       {/* Sell section — dark register experience */}
       <Route element={<SellLayout />}>
         <Route path="/sell" element={<RegisterScreen />} />
@@ -50,6 +52,7 @@ export function App() {
         <Route path="/customers" element={<CustomersPage />} />
         <Route path="/finance" element={<FinancePage />} />
         <Route path="/setup" element={<SetupPage />} />
+      </Route>
       </Route>
 
       <Route path="*" element={<Navigate to="/sell" replace />} />

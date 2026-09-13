@@ -1,4 +1,5 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { useUsers } from '../store/userStore';
 
 type IconName =
   | 'home'
@@ -133,7 +134,7 @@ export function IconRail() {
       {TOP.map(item)}
       <div className="rail-divider" />
       {MAIN.map(item)}
-      <button className="rail-collapse" title="Log out" aria-label="Log out" onClick={() => nav('/login')}>
+      <button className="rail-collapse" title="Log out" aria-label="Log out" onClick={() => { useUsers.getState().logout(); nav('/login'); }}>
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
           <path d="M16 17l5-5-5-5" />
