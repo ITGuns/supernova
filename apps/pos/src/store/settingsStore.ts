@@ -10,10 +10,9 @@ export interface TaxOption {
 }
 
 // Initial seed — the live, editable list lives in the store (Setup → Sales taxes).
+// A new store starts with no tax applied; real rates are added in Setup.
 export const TAX_OPTIONS: TaxOption[] = [
   { id: 'tax-none', label: 'No Tax (0%)', rateBps: 0 },
-  { id: 'tax-sales', label: 'Sales Tax (8.25%)', rateBps: 825 },
-  { id: 'tax-food', label: 'Food (0%)', rateBps: 0 },
 ];
 
 interface SettingsState {
@@ -38,7 +37,7 @@ const uid = (): string =>
 export const useSettings = create<SettingsState>()(
   persist(
     (set, get) => ({
-      storeName: 'Nova — Downtown',
+      storeName: 'Nova Retail',
       defaultTaxLabel: 'No Tax (0%)',
       defaultTaxRateBps: 0,
       taxes: TAX_OPTIONS,

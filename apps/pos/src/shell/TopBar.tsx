@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { STORE } from '../data/catalog';
+
 import { useProducts } from '../store/productStore';
 import { useTheme } from '../store/themeStore';
 import { useUsers } from '../store/userStore';
@@ -23,7 +23,7 @@ export function TopBar() {
   const searchRef = useRef<HTMLInputElement>(null);
   const products = useProducts((s) => s.products);
   const currentUser = useUsers((s) => s.users.find((u) => u.id === s.currentUserId) ?? s.users[0]);
-  const userName = (currentUser?.name ?? STORE.cashier).toLowerCase();
+  const userName = (currentUser?.name ?? 'Staff').toLowerCase();
 
   // ⌘/ (or Ctrl+/) focuses the global search.
   useEffect(() => {

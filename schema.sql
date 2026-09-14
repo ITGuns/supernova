@@ -23,7 +23,7 @@ $$;
 -- One row per store (single-tenant for now; extend with org_id later).
 create table if not exists settings (
   id              uuid primary key default uuid_generate_v4(),
-  store_name      text not null default 'Nova — Downtown',
+  store_name      text not null default 'Nova Retail',
   default_tax_label text not null default 'No Tax (0%)',
   default_tax_rate_bps int not null default 0,
   taxes           jsonb not null default '[]',
@@ -186,7 +186,7 @@ create table if not exists customer_groups (
   id    serial primary key,
   name  text not null unique
 );
-insert into customer_groups (name) values ('All Customers'), ('VIP'), ('Wholesale')
+insert into customer_groups (name) values ('All Customers')
   on conflict do nothing;
 
 -- ── Sales (completed transactions) ──────────────────────────
@@ -313,5 +313,5 @@ insert into security_config (id) values ('00000000-0000-0000-0000-000000000005')
 insert into users (id, name, email, role, password, enabled, is_owner, av_color, last_seen)
 values
   ('u-owner', 'Alex Kim',    'alex@nova.local',           'Account owner, Admin', 'alex1234', true, true,  '#4b3df5', 'just now'),
-  ('u-jade',  'Jade Tatom',  'jade.tatom@nova.local',     'Admin',                'jade1234', true, false, '#7c3aed', 'just now')
+  ('u-jade',  'Jade Savage', 'jade.savage@nova.local',    'Admin',                'jade1234', true, false, '#7c3aed', 'just now')
 on conflict (id) do nothing;

@@ -19,13 +19,17 @@ export function CloseRegister() {
   const openRegister = useRegisterSession((s) => s.openRegister);
   const closeRegister = useRegisterSession((s) => s.closeRegister);
   const outlet = useSetup((s) => s.outlets)[0];
+  const paymentTypes = useSetup((s) => s.paymentTypes);
+  const loyaltyEnabled = useSetup((s) => s.loyaltyEnabled);
+  const storeCreditEnabled = useSetup((s) => s.storeCreditEnabled);
   const users = useUsers((s) => s.users);
   const currentUserId = useUsers((s) => s.currentUserId);
   const userName = users.find((u) => u.id === currentUserId)?.name ?? 'Staff';
 
   const [qty, setQty] = useState<Record<number, number>>({});
   const [custom, setCustom] = useState('');
-  const [counted, setCounted] = useState({ closingFloat: '', cashToBank: '', loyalty: '', storeCredit: '', zelle: '', venmo: '' });
+  // Keyed by payment-row key (see `rows`) plus the two cash fields.
+  const [counted, setCounted] = useState<Record<string, string>>({ closingFloat: '', cashToBank: '' });
   const [closeNote, setCloseNote] = useState('');
   const [openFloat, setOpenFloat] = useState('');
 
@@ -33,10 +37,10 @@ export function CloseRegister() {
 
   const movementNet = movements.reduce((sum, m) => sum + (m.type === 'ADD' ? m.amountMinor : -m.amountMinor), 0);
 
-  const { cashReceived, cashRefunded, venmoExpected } = useMemo(() => {
+  const { cashReceived, cashRefunded, cardExpected } = useMemo(() => {
     let cash = 0;
     let refunded = 0;
-    let other = 0;
+    let card = 0;
     const inSession = (t: number) => openedAt == null || t >= openedAt;
     for (const s of sales) {
       if (s.training) continue;
@@ -45,27 +49,32 @@ export function CloseRegister() {
       if (s.refundedAt != null && inSession(s.refundedAt)) {
         for (const t of s.refundTenders ?? []) {
           if (t.method === 'CASH') refunded += t.amountMinor;
-          else other -= t.amountMinor;
+          else card -= t.amountMinor;
         }
       }
       if (!inSession(s.at)) continue;
       cash -= s.changeMinor;
       for (const t of s.tenders) {
         if (t.method === 'CASH') cash += t.amountMinor;
-        else other += t.amountMinor;
+        else card += t.amountMinor;
       }
     }
-    return { cashReceived: cash, cashRefunded: refunded, venmoExpected: other };
+    return { cashReceived: cash, cashRefunded: refunded, cardExpected: card };
   }, [sales, openedAt]);
   const cashExpected = openingFloatMinor + movementNet + cashReceived - cashRefunded;
 
-  const num = (s: string) => Math.round(parseFloat(s || '0') * 100);
+  const num = (s: string | undefined) => Math.round(parseFloat(s || '0') * 100);
+  // One reconciliation row per non-cash way of getting paid: the built-in card
+  // tender (with its expected total from this session's sales), any payment
+  // types configured in Setup, and loyalty / store credit when enabled.
   const rows = [
-    { key: 'loyalty', label: 'Loyalty', expected: 0, counted: num(counted.loyalty) },
-    { key: 'storeCredit', label: 'Store credit', expected: 0, counted: num(counted.storeCredit) },
-    { key: 'zelle', label: 'Zelle', expected: 0, counted: num(counted.zelle) },
-    { key: 'venmo', label: 'venmo', expected: venmoExpected, counted: num(counted.venmo) },
-  ];
+    { key: 'card', label: 'Card', expected: cardExpected, editable: true },
+    ...paymentTypes
+      .filter((t) => t.id !== 'pt-cash' && t.id !== 'pt-card')
+      .map((t) => ({ key: t.id, label: t.name, expected: 0, editable: true })),
+    ...(loyaltyEnabled ? [{ key: 'loyalty', label: 'Loyalty', expected: 0, editable: false }] : []),
+    ...(storeCreditEnabled ? [{ key: 'storeCredit', label: 'Store credit', expected: 0, editable: false }] : []),
+  ].map((r) => ({ ...r, counted: num(counted[r.key]) }));
   const totalExpected = cashExpected + rows.reduce((s, r) => s + r.expected, 0);
   const totalCounted = cashCounted + rows.reduce((s, r) => s + r.counted, 0);
   const diffCls = (d: number) => (d === 0 ? '' : d < 0 ? 'neg' : 'pos');
@@ -82,7 +91,7 @@ export function CloseRegister() {
     // Start the next closure with an empty count sheet.
     setQty({});
     setCustom('');
-    setCounted({ closingFloat: '', cashToBank: '', loyalty: '', storeCredit: '', zelle: '', venmo: '' });
+    setCounted({ closingFloat: '', cashToBank: '' });
     setCloseNote('');
   };
 
@@ -185,7 +194,7 @@ export function CloseRegister() {
           </div>
 
           {rows.map((r) => {
-            const editable = r.key === 'zelle' || r.key === 'venmo';
+            const editable = r.editable;
             const diff = r.counted - r.expected;
             return (
               <div key={r.key} className="cr-pay-row">
@@ -193,7 +202,7 @@ export function CloseRegister() {
                 <span className="r">{fmt(r.expected)}</span>
                 <span className="r">
                   {editable ? (
-                    <input type="number" step="0.01" value={(counted as Record<string, string>)[r.key]} onChange={(e) => setCounted((c) => ({ ...c, [r.key]: e.target.value }))} placeholder="0.00" />
+                    <input type="number" step="0.01" value={counted[r.key] ?? ''} onChange={(e) => setCounted((c) => ({ ...c, [r.key]: e.target.value }))} placeholder="0.00" />
                   ) : (
                     fmt(r.counted)
                   )}

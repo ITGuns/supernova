@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Switch } from '../admin/controls';
 import { fmt } from '../lib/format';
-import { useCatalogMeta } from '../store/catalogMetaStore';
+import { DEFAULT_CATEGORY_ID, useCatalogMeta } from '../store/catalogMetaStore';
 import { type Product, useProducts } from '../store/productStore';
 import { QK_COLORS, QK_SLOTS, type QuickKey, useRegister } from '../store/registerStore';
 
@@ -81,7 +81,7 @@ export function QuickKeyLayoutEditor() {
       name,
       sku: `SKU-${1000 + products.length + 1}`,
       emoji: '📦',
-      categoryId: categories[0]?.id ?? 'retail',
+      categoryId: categories[0]?.id ?? DEFAULT_CATEGORY_ID,
       priceMinor: 0,
       taxGroupId: 'standard',
       enabled: true,

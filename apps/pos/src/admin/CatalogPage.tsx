@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { fmt } from '../lib/format';
 import { ContextNav, type ContextItem } from '../shell/ContextNav';
 import { useAdjustmentReasons } from '../store/adjustmentReasonsStore';
-import { useCatalogMeta } from '../store/catalogMetaStore';
+import { DEFAULT_CATEGORY_ID, useCatalogMeta } from '../store/catalogMetaStore';
 import { useProducts, type Product } from '../store/productStore';
 import '../styles/catalog.css';
 import { Switch } from './controls';
@@ -250,7 +250,7 @@ export function CatalogPage() {
       name: `New Product ${nextNum}`,
       sku: `SKU-${1000 + nextNum}`,
       emoji: '📦',
-      categoryId: categories[0]?.id ?? 'retail',
+      categoryId: categories[0]?.id ?? DEFAULT_CATEGORY_ID,
       priceMinor: 1000,
       taxGroupId: 'standard',
       enabled: true,
@@ -341,7 +341,7 @@ export function CatalogPage() {
             name,
             sku: (iSku >= 0 && (r[iSku] ?? '').trim()) || `IMP-${1000 + idx}`,
             emoji: '📦',
-            categoryId: matchedCat?.id ?? categories[0]?.id ?? 'retail',
+            categoryId: matchedCat?.id ?? categories[0]?.id ?? DEFAULT_CATEGORY_ID,
             priceMinor: Math.round(price * 100),
             taxGroupId: 'standard',
             enabled: true,

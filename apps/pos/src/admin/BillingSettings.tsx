@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useBilling } from '../store/billingStore';
+import { useSettings } from '../store/settingsStore';
 import { useSetup } from '../store/setupStore';
 import '../styles/setup.css';
 import { LicensesGraphic } from './illustrations';
@@ -190,7 +191,7 @@ export function BillingSettings() {
             </div>
             <div className="bill-col">
               <div className="bill-col-h">Billing recipient</div>
-              <div className="bill-detail">Nova — Downtown</div>
+              <div className="bill-detail">{useSettings.getState().storeName}</div>
               {editingRecipient ? (
                 <div className="bill-form">
                   <label>Billing email</label>

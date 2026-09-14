@@ -55,7 +55,7 @@ export const useCustomers = create<CustomerState>()(
   persist(
     (set) => ({
       customers: [],
-      groups: ['All Customers', 'VIP', 'Wholesale'],
+      groups: ['All Customers'],
 
       syncFromDb: async () => {
         const [rows, groups] = await Promise.all([

@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { dbCatalogMeta } from '../lib/db';
-import { CATEGORIES } from '../data/catalog';
 
 // Persisted catalog metadata: categories, brands and suppliers.
 // Shared by the Catalog page (CRUD + filters) and the product edit modal.
@@ -29,11 +28,13 @@ const uid = (): string =>
     ? crypto.randomUUID()
     : `id-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
 
-// Starter set for a store with no catalog metadata in the cloud yet.
+// Starter set for a store with no catalog metadata in the cloud yet: one
+// neutral entry of each kind so the product editor always has a default.
+export const DEFAULT_CATEGORY_ID = 'general';
 const DEFAULTS = {
-  categories: CATEGORIES.map((c) => ({ id: c.id, name: c.name })),
-  brands: [{ id: 'nova', name: 'Nova' }],
-  suppliers: [{ id: 'house', name: 'House' }],
+  categories: [{ id: DEFAULT_CATEGORY_ID, name: 'General' }],
+  brands: [{ id: 'unbranded', name: 'Unbranded' }],
+  suppliers: [{ id: 'direct', name: 'Direct' }],
 };
 
 export const useCatalogMeta = create<CatalogMetaState>()(

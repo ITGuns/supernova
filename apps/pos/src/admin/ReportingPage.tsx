@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CATALOG } from '../data/catalog';
 import { useCustomers } from '../store/customerStore';
 import { useProducts } from '../store/productStore';
 import { useRegisterSession } from '../store/registerSessionStore';
@@ -27,7 +26,6 @@ const NAV: ContextItem[] = [
 
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const kMoney = (v: number) => (v >= 1000 ? `${v / 1000}k` : String(v));
-const CATBYNAME = new Map(CATALOG.map((p) => [p.name, p]));
 
 const DAY_MS = 86_400_000;
 const startOfDay = (t: number): number => {
@@ -396,6 +394,8 @@ export function ReportingPage() {
   }, [sales]);
 
   const invProducts = useProducts((s) => s.products);
+  // Sale lines carry the product name; look the product up for its icon/SKU.
+  const catByName = useMemo(() => new Map(invProducts.map((p) => [p.name, p])), [invProducts]);
   const staffUsers = useUsers((s) => s.users);
   const invMetrics = useMemo(() => {
     const prodMap = new Map<string, { qty: number; rev: number }>();
@@ -1193,8 +1193,8 @@ export function ReportingPage() {
                   soldProducts.map(([name, v], i) => (
                     <div key={name} className="ps-row">
                       <span className="ps-name">
-                        <span className="rt-thumb">{CATBYNAME.get(name)?.emoji ?? '📦'}</span>
-                        <span><span className="rlink">{name}</span><br /><span className="prod-sku">{CATBYNAME.get(name)?.sku ?? '—'}</span></span>
+                        <span className="rt-thumb">{catByName.get(name)?.emoji ?? '📦'}</span>
+                        <span><span className="rlink">{name}</span><br /><span className="prod-sku">{catByName.get(name)?.sku ?? '—'}</span></span>
                       </span>
                       <span className="r">{fmt(v.rev)}</span>
                       <span className="r">{v.qty}</span>
