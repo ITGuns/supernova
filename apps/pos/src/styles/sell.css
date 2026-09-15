@@ -115,3 +115,37 @@ select.sh-input {
 .sh-parked-row .r {
   text-align: right;
 }
+
+/* Open-register prompt shown over the register while the session is closed */
+.pm.reg-open {
+  width: min(440px, 100%);
+}
+.reg-open-body {
+  padding: 20px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.reg-open-text {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.reg-open-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.reg-open-field input {
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 0 12px;
+  font-size: 15px;
+}

@@ -23,6 +23,28 @@ export function OutletsSettings() {
     set({
       receiptTemplates: [...templates, { id: newId(), name: `Receipt template ${templates.length + 1}` }],
     });
+  // The last outlet / template can't be removed: sales and receipts need one.
+  const deleteOutlet = (id: string) => {
+    if (outlets.length <= 1) return;
+    set({ outlets: outlets.filter((o) => o.id !== id) });
+    setExpanded(null);
+  };
+  const deleteTemplate = (id: string) => {
+    if (templates.length <= 1) return;
+    set({ receiptTemplates: templates.filter((t) => t.id !== id) });
+  };
+  const addRegister = (outletId: string) =>
+    set({
+      outlets: outlets.map((o): Outlet =>
+        o.id === outletId ? { ...o, registers: [...o.registers, `Register ${o.registers.length + 1}`] } : o,
+      ),
+    });
+  const deleteRegister = (outletId: string, idx: number) =>
+    set({
+      outlets: outlets.map((o): Outlet =>
+        o.id === outletId && o.registers.length > 1 ? { ...o, registers: o.registers.filter((_, i) => i !== idx) } : o,
+      ),
+    });
 
   const saveOutletName = () => {
     if (editingOutlet !== null) {
@@ -142,18 +164,33 @@ export function OutletsSettings() {
                         ) : (
                           <span>{r}</span>
                         )}
-                        <span
-                          className="rlink"
-                          onClick={() => {
-                            setDraft(r);
-                            setEditingReg({ outletId: o.id, idx });
-                            setEditingOutlet(null);
-                          }}
-                        >
-                          Edit
+                        <span className="out-reg-actions">
+                          <span
+                            className="rlink"
+                            onClick={() => {
+                              setDraft(r);
+                              setEditingReg({ outletId: o.id, idx });
+                              setEditingOutlet(null);
+                            }}
+                          >
+                            Edit
+                          </span>
+                          {o.registers.length > 1 && (
+                            <span className="rlink" onClick={() => deleteRegister(o.id, idx)}>
+                              Remove
+                            </span>
+                          )}
                         </span>
                       </div>
                     ))}
+                    <div className="out-reg out-reg-foot">
+                      <span className="rlink" onClick={() => addRegister(o.id)}>+ Add register</span>
+                      {outlets.length > 1 && (
+                        <span className="rlink out-danger" onClick={() => deleteOutlet(o.id)}>
+                          Delete outlet
+                        </span>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -191,15 +228,21 @@ export function OutletsSettings() {
                   )}
                 </span>
                 <span>Thermal</span>
-                <span
-                  className="c out-edit"
-                  title="Rename template"
-                  onClick={() => {
-                    setDraft(t.name);
-                    setEditingTemplate(t.id);
-                  }}
-                >
-                  ✎
+                <span className="c out-edit out-edit-pair">
+                  <span
+                    title="Rename template"
+                    onClick={() => {
+                      setDraft(t.name);
+                      setEditingTemplate(t.id);
+                    }}
+                  >
+                    ✎
+                  </span>
+                  {templates.length > 1 && (
+                    <span title="Delete template" onClick={() => deleteTemplate(t.id)}>
+                      🗑
+                    </span>
+                  )}
                 </span>
               </div>
             ))}

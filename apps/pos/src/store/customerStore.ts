@@ -53,7 +53,7 @@ const fromRow = (r: Record<string, unknown>): CustomerRow => ({
 
 export const useCustomers = create<CustomerState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       customers: [],
       groups: ['All Customers'],
 
@@ -92,7 +92,10 @@ export const useCustomers = create<CustomerState>()(
       },
 
       addGroup: (name) => {
-        set((s) => (s.groups.includes(name) ? s : { groups: [...s.groups, name] }));
+        // Group names are unique in the cloud too: adding one that already
+        // exists is a no-op rather than a duplicate-key error.
+        if (get().groups.includes(name)) return;
+        set((s) => ({ groups: [...s.groups, name] }));
         dbCustomers.addGroup(name);
       },
 

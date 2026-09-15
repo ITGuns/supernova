@@ -372,6 +372,10 @@ export function ProductEditor() {
       setError('A composite product needs at least one component.');
       return;
     }
+    if (draft.productType === 'variant' && isNew && combos.length === 0) {
+      setError('A variant product needs at least one attribute with values (e.g. Size: S, M, L), or choose Standard product.');
+      return;
+    }
     const common = base();
     ensureTags(draft.tags);
 

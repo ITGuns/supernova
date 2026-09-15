@@ -78,6 +78,8 @@ export function SetupPage() {
   const [devTab, setDevTab] = useState<'devices' | 'label'>('label');
   const setup = useSetup();
   const storeName = useSettings((s) => s.storeName);
+  // The store's private address follows its name: "Nova Retail" → nova-retail.retail.novapos.io
+  const storeSlug = storeName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'store';
   const setStoreName = useSettings((s) => s.setStoreName);
   const taxes = useSettings((s) => s.taxes);
   const defaultTaxLabel = useSettings((s) => s.defaultTaxLabel);
@@ -164,7 +166,7 @@ export function SetupPage() {
                       </div>
                       <div className="set-field">
                         <label>Private URL</label>
-                        <input className="set-input" defaultValue="nova-downtown.retail.novapos.io" readOnly />
+                        <input className="set-input" value={`${storeSlug}.retail.novapos.io`} readOnly />
                       </div>
                     </div>
                     <div className="set-two">

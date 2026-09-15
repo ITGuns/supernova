@@ -6,6 +6,7 @@ import { initials, useUsers } from '../store/userStore';
 import { fmt } from '../lib/format';
 import { ContextNav, type ContextItem } from '../shell/ContextNav';
 import { useCart } from '../store/cartStore';
+import { useAdjustmentReasons } from '../store/adjustmentReasonsStore';
 import { KpiChart } from './KpiChart';
 import { Sparkline } from './Sparkline';
 import '../styles/reporting.css';
@@ -67,15 +68,28 @@ function SortGlyph({ dir = 'desc' }: { dir?: 'asc' | 'desc' }) {
 const GRANS = ['Year', 'Quarter', 'Month', 'Week', 'Day', 'Hour'];
 const MONTHS_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
+/** Midnight today, in local time. */
+const today = (): Date => {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+};
+/** Midnight `n` days before today. */
+const daysAgo = (n: number): Date => {
+  const d = today();
+  d.setDate(d.getDate() - n);
+  return d;
+};
+const rangeLabel = (s: Date, e: Date): string => `${fmtDate(s)} to ${fmtDate(e)}`;
+
 const parseRange = (rangeStr: string): { start: Date; end: Date } => {
   try {
     const parts = rangeStr.split(' to ');
     const parseDate = (s: string) => {
       const clean = s.trim();
       const match = clean.match(/^([A-Za-z]+)\s+(\d+),\s+(\d+)$/);
-      if (!match) return new Date(2025, 6, 11);
+      if (!match) return today();
       const [, mStr, dStr, yStr] = match;
-      if (!mStr || !dStr || !yStr) return new Date(2025, 6, 11);
+      if (!mStr || !dStr || !yStr) return today();
       const mIdx = MON.indexOf(mStr.substring(0, 3));
       return new Date(parseInt(yStr), mIdx >= 0 ? mIdx : 6, parseInt(dStr));
     };
@@ -90,7 +104,10 @@ const parseRange = (rangeStr: string): { start: Date; end: Date } => {
     e.setHours(23, 59, 59, 999);
     return { start: s, end: e };
   } catch (e) {
-    return { start: new Date(2025, 6, 11), end: new Date(2025, 6, 11, 23, 59, 59) };
+    const s = today();
+    const end = new Date(s);
+    end.setHours(23, 59, 59, 999);
+    return { start: s, end };
   }
 };
 
@@ -101,22 +118,15 @@ function DateRangeField({ value, onApply }: { value: string; onApply: (s: string
   const [opt, setOpt] = useState<'todate' | 'prevday' | 'prevdays' | 'range'>('range');
   const [prevDays, setPrevDays] = useState(2);
   const [rangeDays, setRangeDays] = useState(1);
-  const [month, setMonth] = useState(6); // July
-  const [day, setDay] = useState(11);
-  const [year, setYear] = useState(2025);
+  const base = today();
+  const [month, setMonth] = useState(base.getMonth());
+  const [day, setDay] = useState(base.getDate());
+  const [year, setYear] = useState(base.getFullYear());
 
-  const base = new Date(2025, 6, 11);
   const computed = (): string => {
-    if (opt === 'todate') return `${fmtDate(base)} to ${fmtDate(base)}`;
-    if (opt === 'prevday') {
-      const d = new Date(2025, 6, 10);
-      return `${fmtDate(d)} to ${fmtDate(d)}`;
-    }
-    if (opt === 'prevdays') {
-      const s = new Date(2025, 6, 11 - prevDays);
-      const e = new Date(2025, 6, 10);
-      return `${fmtDate(s)} to ${fmtDate(e)}`;
-    }
+    if (opt === 'todate') return rangeLabel(base, base);
+    if (opt === 'prevday') return rangeLabel(daysAgo(1), daysAgo(1));
+    if (opt === 'prevdays') return rangeLabel(daysAgo(prevDays), daysAgo(1));
     const s = new Date(year, month, day);
     const e = new Date(year, month, day + rangeDays - 1);
     return `${fmtDate(s)} to ${fmtDate(e)}`;
@@ -174,7 +184,7 @@ function DateRangeField({ value, onApply }: { value: string; onApply: (s: string
                       {Array.from({ length: 31 }, (_, i) => <option key={i} value={i + 1}>{i + 1}</option>)}
                     </select>
                     <select value={year} onChange={(e) => setYear(Number(e.target.value))}>
-                      {[2023, 2024, 2025, 2026].map((y) => <option key={y} value={y}>{y}</option>)}
+                      {Array.from({ length: 5 }, (_, i) => base.getFullYear() - 3 + i).map((y) => <option key={y} value={y}>{y}</option>)}
                     </select>
                   </div>
                 </div>
@@ -226,7 +236,10 @@ function downloadCSV(name: string, rows: string[][]) {
 }
 
 export function ReportingPage() {
-  const sales = useCart((s) => s.sales);
+  const allSales = useCart((s) => s.sales);
+  // Training-mode sales are practice runs: they never count in any report.
+  const sales = useMemo(() => allSales.filter((s) => !s.training), [allSales]);
+  const adjustmentReasons = useAdjustmentReasons((s) => s.reasons);
   const regStatus = useRegisterSession((s) => s.status);
   const regOpenedAt = useRegisterSession((s) => s.openedAt);
   const regOpeningFloat = useRegisterSession((s) => s.openingFloatMinor);
@@ -264,23 +277,23 @@ export function ReportingPage() {
   const [salesReport, setSalesReport] = useState('Sales summary');
   const [salesMeasure, setSalesMeasure] = useState('Revenue');
   const [salesComparison, setSalesComparison] = useState('No comparison');
-  const [salesRange, setSalesRange] = useState('Jul 11, 2025 to Jul 11, 2025');
+  const [salesRange, setSalesRange] = useState(() => rangeLabel(today(), today()));
 
   // Payment report
   const [payReport, setPayReport] = useState('Payment type');
   const [payMeasure, setPayMeasure] = useState('Amount');
   const [payComparison, setPayComparison] = useState('No comparison');
-  const [payRange, setPayRange] = useState('Jul 1, 2025 to Jul 31, 2025');
+  const [payRange, setPayRange] = useState(() => rangeLabel(new Date(today().getFullYear(), today().getMonth(), 1), today()));
 
   // Adjustment report
   const [adjReasons, setAdjReasons] = useState('All reasons');
   const [adjMode, setAdjMode] = useState('Include');
   const [adjFilter, setAdjFilter] = useState('');
-  const [adjRange, setAdjRange] = useState('Jun 15, 2026 to Jul 11, 2026');
+  const [adjRange, setAdjRange] = useState(() => rangeLabel(daysAgo(30), today()));
 
   // User reports
   const [userSearch, setUserSearch] = useState('');
-  const [userRange, setUserRange] = useState('Jul 4, 2026 to Jul 11, 2026');
+  const [userRange, setUserRange] = useState(() => rangeLabel(daysAgo(7), today()));
   const [partnerOpen, setPartnerOpen] = useState(true);
   const [userSort, setUserSort] = useState<'asc' | 'desc'>('asc');
 
@@ -386,12 +399,16 @@ export function ReportingPage() {
     };
   }, [payFiltered]);
 
-  // Date range metrics for Inventory Report (defaults to Jul 1, 2025 to Jul 31, 2025)
+  // Inventory report covers the current calendar month to date.
+  const invRange = useMemo(() => {
+    const t = today();
+    return { start: new Date(t.getFullYear(), t.getMonth(), 1), end: t };
+  }, []);
   const invFiltered = useMemo(() => {
-    const start = new Date(2025, 6, 1).getTime();
-    const end = new Date(2025, 6, 31, 23, 59, 59, 999).getTime();
+    const start = invRange.start.getTime();
+    const end = new Date(invRange.end.getFullYear(), invRange.end.getMonth(), invRange.end.getDate(), 23, 59, 59, 999).getTime();
     return sales.filter((s) => s.status !== 'Returned' && s.at >= start && s.at <= end);
-  }, [sales]);
+  }, [sales, invRange]);
 
   const invProducts = useProducts((s) => s.products);
   // Sale lines carry the product name; look the product up for its icon/SKU.
@@ -808,7 +825,7 @@ export function ReportingPage() {
                     </div>
                     <div className="rep-fg">
                       <label>Date range</label>
-                      <div className="rep-daterange">📅 Jul 1, 2025 to Jul 31, 2025</div>
+                      <div className="rep-daterange">📅 {rangeLabel(invRange.start, invRange.end)}</div>
                     </div>
                   </div>
                   <div className="rep-toolbar">
@@ -990,7 +1007,8 @@ export function ReportingPage() {
                 <div className="rep-fg">
                   <label>Reasons</label>
                   <select value={adjReasons} onChange={(e) => setAdjReasons(e.target.value)}>
-                    <option>All reasons</option><option>Damage</option><option>Theft</option><option>Stock Found</option>
+                    <option>All reasons</option>
+                    {adjustmentReasons.map((r) => <option key={r.id}>{r.name}</option>)}
                   </select>
                 </div>
                 <div className="rep-fg">

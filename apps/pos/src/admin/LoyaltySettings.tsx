@@ -161,6 +161,17 @@ export function LoyaltySettings() {
         <span className="bill-cancel" onClick={() => set({ loyaltyEnabled: false })}>
           Disable Loyalty
         </span>
+        <div className="setrow">
+          <div>
+            <div className="set-h">Disable Loyalty</div>
+            <div className="set-desc">Customers stop earning Loyalty and can’t redeem it in-store or online. Balances are kept.</div>
+          </div>
+          <div className="set-fields">
+            <button className="btn-s danger" onClick={() => set({ loyaltyEnabled: false })}>
+              Disable Loyalty
+            </button>
+          </div>
+        </div>
       </div>
     </>
   );

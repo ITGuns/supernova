@@ -85,7 +85,9 @@ type Period = (typeof PERIODS)[number];
 
 export function HomePage() {
   const navigate = useNavigate();
-  const sales = useCart((s) => s.sales);
+  const allSales = useCart((s) => s.sales);
+  // Training-mode sales are practice runs: they never count as revenue.
+  const sales = useMemo(() => allSales.filter((s) => !s.training), [allSales]);
   const salesTargetMinor = useSetup((s) => s.salesTargetMinor);
   const setSetup = useSetup((s) => s.set);
   const users = useUsers((s) => s.users);

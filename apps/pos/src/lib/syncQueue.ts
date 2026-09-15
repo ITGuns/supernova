@@ -97,6 +97,18 @@ const execOp = async (op: QueuedOp): Promise<SbError | null> => {
  */
 export async function write(op: Omit<QueuedOp, 'id' | 'at' | 'attempts'>): Promise<void> {
   if (!isSupabaseConfigured()) return;
+  // Writes to one table run in the order they were issued. Two back-to-back
+  // requests (park a sale, then retrieve it) can otherwise overtake each
+  // other on the network, so a delete lands before the insert it undoes.
+  const prev = tableChains.get(op.table) ?? Promise.resolve();
+  const run = prev.then(() => execWrite(op));
+  tableChains.set(op.table, run.catch(() => undefined));
+  return run;
+}
+
+const tableChains = new Map<string, Promise<void>>();
+
+async function execWrite(op: Omit<QueuedOp, 'id' | 'at' | 'attempts'>): Promise<void> {
   const error = await execOp({ ...op, id: '', at: 0, attempts: 0 });
   if (!error) return;
   if (isTransient(error)) {

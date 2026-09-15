@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { fmt } from '../lib/format';
 import { ContextNav, type ContextItem } from '../shell/ContextNav';
@@ -197,6 +197,23 @@ export function CatalogPage() {
   });
 
   const toggleActive = (id: string) => togP(id);
+
+  // Variants of one product share a productId; the list shows them as a
+  // single family row that expands to the individual variants.
+  const families = useMemo(() => {
+    const byFamily = new Map<string, Product[]>();
+    for (const p of rows) {
+      const key = p.variants > 0 ? p.productId : p.id;
+      byFamily.set(key, [...(byFamily.get(key) ?? []), p]);
+    }
+    return [...byFamily.entries()].map(([key, members]) => ({ key, members, lead: members[0]! }));
+  }, [rows]);
+  /** "QA Tee / M" → "QA Tee": the family name is what the variants share. */
+  const familyName = (members: Product[]) => {
+    const lead = members[0]?.name ?? '';
+    const idx = lead.lastIndexOf(' / ');
+    return members.length > 1 && idx > 0 ? lead.slice(0, idx) : lead;
+  };
 
   const toggleSelect = (id: string) =>
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -892,63 +909,76 @@ export function CatalogPage() {
                   <span>Created</span>
                   <span />
                 </div>
-                {rows.map((p) => (
-                  <div key={p.id}>
-                    <div className="arow prod2" onClick={() => p.variants > 0 && setExpanded((e) => (e === p.id ? null : p.id))}>
-                      <span className="c" onClick={(e) => e.stopPropagation()}>
-                        <span
-                          className={`acheck sel ${selectedIds.includes(p.id) ? 'on' : ''}`}
-                          onClick={() => toggleSelect(p.id)}
-                        />
-                      </span>
-                      <span className="c">
-                        {p.variants > 0 && <span className={`pchev ${expanded === p.id ? 'open' : ''}`}>›</span>}
-                      </span>
-                      <span className="prod2-name">
-                        <span className="pthumb">
-                          {p.image ? <img src={p.image} alt={p.name} className="pthumb-img" /> : p.emoji}
+                {families.map(({ key, members, lead }) => {
+                  const isFamily = members.length > 1;
+                  const ids = members.map((m) => m.id);
+                  const allSelected = ids.every((id) => selectedIds.includes(id));
+                  const available = members.reduce((sum, m) => sum + availableOf(m, products), 0);
+                  const prices = members.map((m) => m.priceMinor);
+                  const priceLabel =
+                    Math.min(...prices) === Math.max(...prices) ? fmt(lead.priceMinor) : `${fmt(Math.min(...prices))} – ${fmt(Math.max(...prices))}`;
+                  const anyEnabled = members.some((m) => m.enabled);
+                  return (
+                    <div key={key}>
+                      <div className="arow prod2" onClick={() => isFamily && setExpanded((e) => (e === key ? null : key))}>
+                        <span className="c" onClick={(e) => e.stopPropagation()}>
+                          <span
+                            className={`acheck sel ${allSelected ? 'on' : ''}`}
+                            onClick={() =>
+                              setSelectedIds((prev) => (allSelected ? prev.filter((x) => !ids.includes(x)) : [...prev, ...ids.filter((x) => !prev.includes(x))]))
+                            }
+                          />
                         </span>
-                        <span>
-                          <span className="rlink" onClick={(e) => { e.stopPropagation(); startEditProd(p); }}>
-                            {p.name}
+                        <span className="c">
+                          {isFamily && <span className={`pchev ${expanded === key ? 'open' : ''}`}>›</span>}
+                        </span>
+                        <span className="prod2-name">
+                          <span className="pthumb">
+                            {lead.image ? <img src={lead.image} alt={lead.name} className="pthumb-img" /> : lead.emoji}
                           </span>
-                          <br />
-                          <span className="prod-sku">{p.variants > 0 ? `${p.variants} variants` : p.sku}</span>
-                        </span>
-                      </span>
-                      <span className="rlink">{p.brand}</span>
-                      <span className="rlink">{p.supplier}</span>
-                      <span className="r">{availableOf(p, products)}</span>
-                      <span className="r">{fmt(p.priceMinor)}</span>
-                      <span className="c" onClick={(e) => e.stopPropagation()}>
-                        <Switch on={p.enabled} onClick={() => toggleActive(p.id)} />
-                      </span>
-                      <span className="prod-created">{p.created}</span>
-                      <span
-                        className="c prod-pencil"
-                        style={{ cursor: 'pointer' }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          startEditProd(p);
-                        }}
-                      >
-                        ✎
-                      </span>
-                    </div>
-                    {expanded === p.id && p.variants > 0 && (
-                      <div className="prod-variants">
-                        {Array.from({ length: p.variants }).map((_, vi) => (
-                          <div key={vi} className="pvar-row">
-                            <span>
-                              {p.name} · Variant {vi + 1}
+                          <span>
+                            <span className="rlink" onClick={(e) => { e.stopPropagation(); startEditProd(lead); }}>
+                              {familyName(members)}
                             </span>
-                            <span className="r">{fmt(p.priceMinor)}</span>
-                          </div>
-                        ))}
+                            <br />
+                            <span className="prod-sku">{isFamily ? `${members.length} variants` : lead.sku}</span>
+                          </span>
+                        </span>
+                        <span className="rlink">{lead.brand}</span>
+                        <span className="rlink">{lead.supplier}</span>
+                        <span className="r">{available}</span>
+                        <span className="r">{priceLabel}</span>
+                        <span className="c" onClick={(e) => e.stopPropagation()}>
+                          <Switch on={anyEnabled} onClick={() => members.forEach((m) => (m.enabled === anyEnabled ? toggleActive(m.id) : undefined))} />
+                        </span>
+                        <span className="prod-created">{lead.created}</span>
+                        <span
+                          className="c prod-pencil"
+                          style={{ cursor: 'pointer' }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEditProd(lead);
+                          }}
+                        >
+                          ✎
+                        </span>
                       </div>
-                    )}
-                  </div>
-                ))}
+                      {expanded === key && isFamily && (
+                        <div className="prod-variants">
+                          {members.map((m) => (
+                            <div key={m.id} className="pvar-row">
+                              <span>
+                                <span className="rlink" onClick={() => startEditProd(m)}>{m.name}</span>
+                                <span className="prod-sku"> · {m.sku}</span>
+                              </span>
+                              <span className="r">{availableOf(m, products)} available · {fmt(m.priceMinor)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </>
           )}
