@@ -118,6 +118,19 @@ export const dbProducts = {
   },
   upsert: (row: Row) => upsert('products', row),
   del: (id: string) => delBy('products', 'id', id),
+  /**
+   * Whether the table has the product-profile columns (migration 0005).
+   * Selecting the column is validated by PostgREST even on an empty table,
+   * so this works before the first product exists. null = couldn't tell.
+   */
+  async hasDetailColumns(): Promise<boolean | null> {
+    if (!ok()) return null;
+    const { error } = await supabase.from('products').select('product_type').limit(1);
+    if (!error) return true;
+    if (/product_type/.test(error.message)) return false;
+    reportDbError('products.probe', error.message);
+    return null;
+  },
 };
 
 // ─── Customers ───────────────────────────────────────────────────────────────

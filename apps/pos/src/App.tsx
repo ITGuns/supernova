@@ -5,6 +5,7 @@ import { FinancePage } from './admin/FinancePage';
 import { HomePage } from './admin/HomePage';
 import { InventoryPage } from './admin/InventoryPage';
 import { OnlinePage } from './admin/OnlinePage';
+import { ProductEditor } from './admin/ProductEditor';
 import { ReportingPage } from './admin/ReportingPage';
 import { SetupPage } from './admin/SetupPage';
 import { AdminLayout } from './shell/AdminLayout';
@@ -48,6 +49,8 @@ export function App() {
         <Route path="/online" element={<OnlinePage />} />
         <Route path="/reporting" element={<ReportingPage />} />
         <Route path="/catalog" element={<CatalogPage />} />
+        <Route path="/catalog/products/new" element={<ProductEditor />} />
+        <Route path="/catalog/products/:id" element={<ProductEditor />} />
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/customers" element={<CustomersPage />} />
         <Route path="/finance" element={<FinancePage />} />

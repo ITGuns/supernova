@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { fmt } from '../lib/format';
 import { ContextNav, type ContextItem } from '../shell/ContextNav';
 import { useAdjustmentReasons } from '../store/adjustmentReasonsStore';
 import { DEFAULT_CATEGORY_ID, useCatalogMeta } from '../store/catalogMetaStore';
-import { useProducts, type Product } from '../store/productStore';
+import { availableOf, useProducts, type Product } from '../store/productStore';
 import '../styles/catalog.css';
 import { Switch } from './controls';
 import { CatalogTShirt, CustomizeCard, GiftCardArt, RevenueChart, Rocket } from './illustrations';
@@ -92,6 +92,7 @@ function SortIcon({ dir }: { dir: 'asc' | 'desc' }) {
 }
 
 export function CatalogPage() {
+  const navigate = useNavigate();
   const location = useLocation();
   const initialQ = (location.state as { q?: string } | null)?.q ?? '';
   const [active, setActive] = useState('products');
@@ -137,18 +138,6 @@ export function CatalogPage() {
 
   // Row selection
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-
-  // Edit Product Modal states
-  const [editingProdId, setEditingProdId] = useState<string | null>(null);
-  const [editName, setEditName] = useState('');
-  const [editSku, setEditSku] = useState('');
-  const [editEmoji, setEditEmoji] = useState('📦');
-  const [editImage, setEditImage] = useState<string | undefined>(undefined);
-  const [editPrice, setEditPrice] = useState('0.00');
-  const [editAvailable, setEditAvailable] = useState(0);
-  const [editBrand, setEditBrand] = useState('Nova');
-  const [editSupplier, setEditSupplier] = useState('House');
-  const [editCategoryId, setEditCategoryId] = useState('retail');
 
   // Unified editing entity modal state (categories, brands, suppliers)
   const [editingEntity, setEditingEntity] = useState<{
@@ -199,70 +188,14 @@ export function CatalogPage() {
     setSelectedIds([]);
   };
 
-  const startEditProd = (p: Product) => {
-    setEditingProdId(p.id);
-    setEditName(p.name);
-    setEditSku(p.sku);
-    setEditEmoji(p.emoji);
-    setEditImage(p.image);
-    setEditPrice((p.priceMinor / 100).toFixed(2));
-    setEditAvailable(p.available);
-    setEditBrand(p.brand);
-    setEditSupplier(p.supplier);
-    setEditCategoryId(p.categoryId);
-  };
-
-  const onPickImage = (file: File | undefined) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setEditImage(typeof reader.result === 'string' ? reader.result : undefined);
-    reader.readAsDataURL(file);
-  };
-
-  const saveProductEdit = () => {
-    if (!editingProdId) return;
-    updP(editingProdId, {
-      name: editName,
-      sku: editSku,
-      emoji: editEmoji,
-      image: editImage,
-      priceMinor: Math.round(parseFloat(editPrice || '0') * 100),
-      available: Number(editAvailable),
-      brand: editBrand,
-      supplier: editSupplier,
-      categoryId: editCategoryId,
-    });
-    setEditingProdId(null);
-  };
+  const startEditProd = (p: Product) => navigate(`/catalog/products/${p.id}`);
 
   const deleteProduct = (id: string) => {
     delP(id);
     setSelectedIds((prev) => prev.filter((x) => x !== id));
-    setEditingProdId(null);
   };
 
-  const addProduct = () => {
-    const nextNum = products.length + 1;
-    const id = `p-${Date.now()}`;
-    const newProd: Product = {
-      id,
-      productId: id,
-      name: `New Product ${nextNum}`,
-      sku: `SKU-${1000 + nextNum}`,
-      emoji: '📦',
-      categoryId: categories[0]?.id ?? DEFAULT_CATEGORY_ID,
-      priceMinor: 1000,
-      taxGroupId: 'standard',
-      enabled: true,
-      created: 'Today',
-      variants: 0,
-      available: 10,
-      brand: brands[0]?.name ?? 'Nova',
-      supplier: suppliers[0]?.name ?? 'House',
-    };
-    addP(newProd);
-    startEditProd(newProd);
-  };
+  const addProduct = () => navigate('/catalog/products/new');
 
   const saveEntityEdit = () => {
     if (!editingEntity) return;
@@ -879,7 +812,7 @@ export function CatalogPage() {
                       </span>
                       <span className="rlink">{p.brand}</span>
                       <span className="rlink">{p.supplier}</span>
-                      <span className="r">{p.available}</span>
+                      <span className="r">{availableOf(p, products)}</span>
                       <span className="r">{fmt(p.priceMinor)}</span>
                       <span className="c" onClick={(e) => e.stopPropagation()}>
                         <Switch on={p.enabled} onClick={() => toggleActive(p.id)} />
@@ -915,177 +848,6 @@ export function CatalogPage() {
           )}
         </div>
       </main>
-
-      {editingProdId !== null && (
-        <div className="pm-overlay" onClick={() => setEditingProdId(null)}>
-          <div className="pm" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
-            <div className="pm-head">
-              <h2>Edit Product Profile</h2>
-              <button className="pm-close" onClick={() => setEditingProdId(null)} aria-label="Close">
-                ×
-              </button>
-            </div>
-            <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <div className="set-field" style={{ width: '84px' }}>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                    Image
-                  </label>
-                  <label className="prod-img-drop" title="Upload product image">
-                    {editImage ? (
-                      <img src={editImage} alt="Product" className="prod-img-preview" />
-                    ) : (
-                      <span className="prod-img-emoji">{editEmoji}</span>
-                    )}
-                    <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => onPickImage(e.target.files?.[0])} />
-                    <span className="prod-img-plus">+</span>
-                  </label>
-                  {editImage && (
-                    <button type="button" className="prod-img-remove" onClick={() => setEditImage(undefined)}>Remove</button>
-                  )}
-                </div>
-                <div className="set-field" style={{ flex: 1 }}>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                    Product name
-                  </label>
-                  <input
-                    className="set-input"
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    placeholder="Product Name"
-                    style={{ width: '100%', boxSizing: 'border-box' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <div className="set-field" style={{ flex: 1 }}>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                    SKU code
-                  </label>
-                  <input
-                    className="set-input"
-                    value={editSku}
-                    onChange={(e) => setEditSku(e.target.value)}
-                    placeholder="e.g. COF-LAT"
-                    style={{ width: '100%', boxSizing: 'border-box' }}
-                  />
-                </div>
-                <div className="set-field" style={{ flex: 1 }}>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                    Category
-                  </label>
-                  <select
-                    className="set-select"
-                    value={editCategoryId}
-                    onChange={(e) => setEditCategoryId(e.target.value)}
-                    style={{ width: '100%', boxSizing: 'border-box', height: '40px' }}
-                  >
-                    {!categories.some((c) => c.id === editCategoryId) && (
-                      <option value={editCategoryId}>{editCategoryId}</option>
-                    )}
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <div className="set-field" style={{ flex: 1 }}>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                    Brand
-                  </label>
-                  <select
-                    className="set-select"
-                    value={editBrand}
-                    onChange={(e) => setEditBrand(e.target.value)}
-                    style={{ width: '100%', boxSizing: 'border-box', height: '40px' }}
-                  >
-                    {!brands.some((b) => b.name === editBrand) && <option value={editBrand}>{editBrand}</option>}
-                    {brands.map((b) => (
-                      <option key={b.id} value={b.name}>{b.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="set-field" style={{ flex: 1 }}>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                    Supplier
-                  </label>
-                  <select
-                    className="set-select"
-                    value={editSupplier}
-                    onChange={(e) => setEditSupplier(e.target.value)}
-                    style={{ width: '100%', boxSizing: 'border-box', height: '40px' }}
-                  >
-                    {!suppliers.some((s) => s.name === editSupplier) && (
-                      <option value={editSupplier}>{editSupplier}</option>
-                    )}
-                    {suppliers.map((s) => (
-                      <option key={s.id} value={s.name}>{s.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <div className="set-field" style={{ flex: 1 }}>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                    Retail price
-                  </label>
-                  <input
-                    className="set-input"
-                    value={editPrice}
-                    onChange={(e) => setEditPrice(e.target.value)}
-                    placeholder="0.00"
-                    style={{ width: '100%', boxSizing: 'border-box' }}
-                  />
-                </div>
-                <div className="set-field" style={{ flex: 1 }}>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                    Available stock
-                  </label>
-                  <input
-                    className="set-input"
-                    type="number"
-                    value={editAvailable}
-                    onChange={(e) => setEditAvailable(Number(e.target.value))}
-                    placeholder="0"
-                    style={{ width: '100%', boxSizing: 'border-box' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '12px', alignItems: 'center' }}>
-                <button
-                  type="button"
-                  onClick={() => deleteProduct(editingProdId)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#e11d48',
-                    cursor: 'pointer',
-                    fontWeight: 600,
-                    fontSize: '14px',
-                    padding: '8px 0',
-                    outline: 'none',
-                  }}
-                >
-                  Delete Product
-                </button>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <button className="btn-s" onClick={() => setEditingProdId(null)} type="button">
-                    Cancel
-                  </button>
-                  <button className="btn-p" onClick={saveProductEdit} disabled={!editName.trim()} type="button">
-                    Save changes
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {editingEntity !== null && (
         <div className="pm-overlay" onClick={() => setEditingEntity(null)}>

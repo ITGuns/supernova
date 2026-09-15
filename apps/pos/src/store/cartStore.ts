@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { CatalogItem, TaxGroupId } from '../data/catalog';
-import { useProducts } from './productStore';
+import { stockLinesFor, useProducts } from './productStore';
 import { useRegister } from './registerStore';
 import { useUsers } from './userStore';
 import { dbSales, dbParked } from '../lib/db';
@@ -311,7 +311,9 @@ export const useCart = create<CartState>()(
       const prodStore = useProducts.getState();
       for (const line of state.lines) {
         const prod = prodStore.products.find((p) => p.id === line.variantId);
-        if (prod) prodStore.updateProduct(prod.id, { available: Math.max(0, prod.available - line.quantity) });
+        if (!prod) continue;
+        // A composite consumes its components' stock, not its own.
+        for (const s of stockLinesFor(prod, line.quantity)) prodStore.adjustStock(s.id, s.delta);
       }
     }
 
@@ -357,7 +359,8 @@ export const useCart = create<CartState>()(
         const prod = line.variantId
           ? prodStore.products.find((p) => p.id === line.variantId)
           : prodStore.products.find((p) => p.name === line.name);
-        if (prod) prodStore.updateProduct(prod.id, { available: prod.available + line.quantity });
+        if (!prod) continue;
+        for (const s of stockLinesFor(prod, line.quantity)) prodStore.adjustStock(s.id, -s.delta);
       }
     }
 
