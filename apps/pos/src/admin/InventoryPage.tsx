@@ -1,16 +1,11 @@
 import { useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { fmt } from '../lib/format';
 import { ContextNav, type ContextItem } from '../shell/ContextNav';
 import { useCatalogMeta } from '../store/catalogMetaStore';
-import {
-  useInventory,
-  type StockTx,
-  type StockTxKind,
-  type StockTxLine,
-  type StockTxStatus,
-} from '../store/inventoryStore';
-import { useProducts } from '../store/productStore';
+import { countBucket, txQty, txTotal, useInventory, type StockTx, type StockTxKind, type StockTxStatus } from '../store/inventoryStore';
 import '../styles/catalog.css';
-import { BagPhone, CatBox, ScannerGraphic } from './illustrations';
+import { BagPhone, CatBox, InventoryGraphic, ScannerGraphic } from './illustrations';
 
 const NAV: ContextItem[] = [
   { key: 'stock', label: 'Stock control' },
@@ -18,147 +13,75 @@ const NAV: ContextItem[] = [
   { key: 'fulfillments', label: 'Fulfillments' },
 ];
 
-const TX_STATUSES: StockTxStatus[] = ['Draft', 'Open', 'Sent', 'Dispatched', 'Received', 'Cancelled'];
+const TX_STATUSES: StockTxStatus[] = ['Open', 'Sent', 'Dispatched', 'Received', 'Cancelled'];
+const ONBOARDING_KEY = 'nova-stock-onboarding-dismissed';
 
-const statusBadge = (status: StockTxStatus) => ({
-  background:
-    status === 'Received'
-      ? 'rgba(63, 174, 107, 0.12)'
-      : status === 'Sent' || status === 'Dispatched' || status === 'Open'
-      ? 'rgba(75, 61, 245, 0.12)'
-      : 'rgba(90, 90, 96, 0.12)',
-  color:
-    status === 'Received'
-      ? '#3fae6b'
-      : status === 'Sent' || status === 'Dispatched' || status === 'Open'
-      ? '#4b3df5'
-      : '#5a5a60',
-  padding: '2px 8px',
-  borderRadius: '4px',
-  fontSize: '12px',
-  fontWeight: 600,
-});
+type StockTab = 'orders' | 'transfers' | 'returns';
+type CountTab = 'due' | 'upcoming' | 'completed' | 'canceled';
+const KIND_OF: Record<StockTab, StockTxKind> = { orders: 'order', transfers: 'transfer', returns: 'return' };
+const WORD: Record<StockTab, string> = { orders: 'order', transfers: 'transfer', returns: 'return' };
 
-const txQty = (t: StockTx) => t.lines.reduce((s, l) => s + l.quantity, 0);
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+const readDismissed = () => {
+  try {
+    return localStorage.getItem(ONBOARDING_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
 
 export function InventoryPage() {
-  const [active, setActive] = useState('stock');
+  const navigate = useNavigate();
+  const location = useLocation();
+  const state = location.state as { tab?: string; stockTab?: StockTab } | null;
+  const [active, setActive] = useState(state?.tab ?? 'stock');
 
   // Persisted inventory data
   const transactions = useInventory((s) => s.transactions);
-  const addTx = useInventory((s) => s.addTransaction);
-  const updTx = useInventory((s) => s.updateTransaction);
-  const delTx = useInventory((s) => s.deleteTransaction);
-  const receiveTx = useInventory((s) => s.receiveTransaction);
   const counts = useInventory((s) => s.counts);
-  const addCountStore = useInventory((s) => s.addCount);
-  const updateCount = useInventory((s) => s.updateCount);
-
-  const products = useProducts((s) => s.products);
   const suppliers = useCatalogMeta((s) => s.suppliers);
 
   // Stock control
-  const [stockTab, setStockTab] = useState<'orders' | 'transfers' | 'returns'>('orders');
+  const [stockTab, setStockTab] = useState<StockTab>(state?.stockTab ?? 'orders');
+  const [qDraft, setQDraft] = useState('');
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | StockTxStatus>('all');
   const [outletFilter, setOutletFilter] = useState('all');
   const [supplierFilter, setSupplierFilter] = useState('all');
   const [sortBy, setSortBy] = useState<'created-desc' | 'created-asc' | 'due-asc' | 'due-desc'>('created-desc');
-  const [showAllFilters, setShowAllFilters] = useState(true);
+  const [showAllFilters, setShowAllFilters] = useState(false);
+  const [onboarding, setOnboarding] = useState(() => !readDismissed());
 
-  // Edit stock transaction state
-  const [editingTxId, setEditingTxId] = useState<string | null>(null);
-  const [txKind, setTxKind] = useState<StockTxKind>('order');
-  const [txNumber, setTxNumber] = useState('');
-  const [txFrom, setTxFrom] = useState('');
-  const [txTo, setTxTo] = useState('');
-  const [txStatus, setTxStatus] = useState<StockTxStatus>('Draft');
-  const [txLines, setTxLines] = useState<StockTxLine[]>([]);
-
-  const startEditTx = (tx: StockTx) => {
-    setEditingTxId(tx.id);
-    setTxKind(tx.kind);
-    setTxNumber(tx.number);
-    setTxFrom(tx.from);
-    setTxTo(tx.to);
-    setTxStatus(tx.status);
-    setTxLines(tx.lines.map((l) => ({ ...l })));
-  };
-
-  const saveTxEdit = () => {
-    if (!editingTxId) return;
-    const orig = transactions.find((t) => t.id === editingTxId);
-    if (txStatus === 'Received' && orig && orig.status !== 'Received') {
-      // Save fields first, then let the store apply the received quantities to product stock.
-      updTx(editingTxId, { number: txNumber, from: txFrom, to: txTo, lines: txLines });
-      receiveTx(editingTxId);
-    } else {
-      updTx(editingTxId, { number: txNumber, from: txFrom, to: txTo, status: txStatus, lines: txLines });
+  const dismissOnboarding = () => {
+    setOnboarding(false);
+    try {
+      localStorage.setItem(ONBOARDING_KEY, '1');
+    } catch {
+      /* private mode: the card simply shows again next time */
     }
-    setEditingTxId(null);
   };
 
-  const deleteTx = () => {
-    if (!editingTxId) return;
-    delTx(editingTxId);
-    setEditingTxId(null);
+  const kind = KIND_OF[stockTab];
+  const outlets = Array.from(new Set(transactions.flatMap((t) => [t.from, t.to]).filter(Boolean)));
+
+  const matchesSearch = (t: StockTx, needle: string) => {
+    const n = needle.toLowerCase();
+    return (
+      t.number.toLowerCase().includes(n) ||
+      t.from.toLowerCase().includes(n) ||
+      t.to.toLowerCase().includes(n) ||
+      t.details.supplierInvoice.toLowerCase().includes(n) ||
+      t.details.note.toLowerCase().includes(n) ||
+      t.lines.some((l) => l.name.toLowerCase().includes(n) || (l.sku ?? '').toLowerCase().includes(n))
+    );
   };
-
-  // Default lines: the first few products from the catalog with sensible quantities.
-  const defaultLines = (): StockTxLine[] =>
-    products.slice(0, 3).map((p, i) => ({ productId: p.id, name: p.name, quantity: i === 0 ? 10 : 5 }));
-
-  const handleOrderStock = () => {
-    const tx = addTx({
-      kind: 'order',
-      from: suppliers[0]?.name ?? 'Supplier',
-      to: 'Main Outlet',
-      status: 'Open',
-      dueAt: Date.now() + 7 * 86400000,
-      lines: defaultLines(),
-    });
-    setStockTab('orders');
-    startEditTx(tx);
-  };
-
-  const handleReceiveStock = () => {
-    const tx = addTx({
-      kind: 'transfer',
-      from: 'Warehouse A',
-      to: 'Main Outlet',
-      status: 'Sent',
-      dueAt: Date.now() + 2 * 86400000,
-      lines: defaultLines(),
-    });
-    setStockTab('transfers');
-    startEditTx(tx);
-  };
-
-  const handleCreateReturn = () => {
-    const tx = addTx({
-      kind: 'return',
-      from: 'Main Outlet',
-      to: suppliers[0]?.name ?? 'Supplier',
-      status: 'Open',
-      dueAt: null,
-      lines: defaultLines(),
-    });
-    setStockTab('returns');
-    startEditTx(tx);
-  };
-
-  const kind: StockTxKind = stockTab === 'orders' ? 'order' : stockTab === 'transfers' ? 'transfer' : 'return';
-  const outlets = Array.from(new Set(transactions.map((t) => t.to)));
 
   const currentList = transactions
     .filter(
       (t) =>
         t.kind === kind &&
-        (q.trim() === '' ||
-          t.number.toLowerCase().includes(q.toLowerCase()) ||
-          t.from.toLowerCase().includes(q.toLowerCase()) ||
-          t.to.toLowerCase().includes(q.toLowerCase()) ||
-          t.lines.some((l) => l.name.toLowerCase().includes(q.toLowerCase()))) &&
+        (q.trim() === '' || matchesSearch(t, q.trim())) &&
         (statusFilter === 'all' || t.status === statusFilter) &&
         (outletFilter === 'all' || t.from === outletFilter || t.to === outletFilter) &&
         (supplierFilter === 'all' || t.from === supplierFilter || t.to === supplierFilter),
@@ -171,7 +94,11 @@ export function InventoryPage() {
       return sortBy === 'due-asc' ? ad - bd : bd - ad;
     });
 
+  const totalQty = currentList.reduce((s, t) => s + txQty(t), 0);
+  const totalCost = currentList.reduce((s, t) => s + txTotal(t), 0);
+
   const clearFilters = () => {
+    setQDraft('');
     setQ('');
     setStatusFilter('all');
     setOutletFilter('all');
@@ -188,15 +115,24 @@ export function InventoryPage() {
     padding: '0 8px',
   } as const;
 
+  const newPath: Record<StockTab, string> = {
+    orders: '/inventory/orders/new',
+    transfers: '/inventory/transfers/new',
+    returns: '/inventory/returns/new',
+  };
+
   // Inventory counts
-  const [countTab, setCountTab] = useState<'due' | 'completed' | 'canceled'>('due');
+  const [countTab, setCountTab] = useState<CountTab>('due');
   const [scannerOpen, setScannerOpen] = useState(true);
-  const dueCounts = counts.filter((c) => c.status === 'In progress');
-  const completedCounts = counts.filter((c) => c.status === 'Completed');
-  const canceledCounts = counts.filter((c) => c.status === 'Cancelled');
-  const visibleCounts = countTab === 'due' ? dueCounts : countTab === 'completed' ? completedCounts : canceledCounts;
-  const addCount = () =>
-    addCountStore({ name: `Main Outlet — Count ${counts.length + 1}`, outlet: 'Main Outlet', status: 'In progress' });
+  const byBucket = (b: CountTab) => counts.filter((c) => countBucket(c) === b);
+  const visibleCounts = byBucket(countTab).sort((a, b) => (countTab === 'upcoming' ? a.startAt - b.startAt : b.startAt - a.startAt));
+  const countEmpty: Record<CountTab, string> = {
+    due: 'You have no inventory counts due',
+    upcoming: 'You have no upcoming inventory counts',
+    completed: 'You have no completed inventory counts',
+    canceled: 'You have no canceled inventory counts',
+  };
+  const whenOf = (ms: number) => new Date(ms).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 
   // Fulfillments
   const [fulTab, setFulTab] = useState<'all' | 'pack' | 'pickup' | 'delivery'>('all');
@@ -213,34 +149,53 @@ export function InventoryPage() {
             <>
               <h1 className="page-title">Stock control</h1>
               <div className="sh-tabs">
-                <button className={`sh-tab ${stockTab === 'orders' ? 'active' : ''}`} onClick={() => setStockTab('orders')}>
-                  Orders
-                </button>
-                <button className={`sh-tab ${stockTab === 'transfers' ? 'active' : ''}`} onClick={() => setStockTab('transfers')}>
-                  Transfers
-                </button>
-                <button className={`sh-tab ${stockTab === 'returns' ? 'active' : ''}`} onClick={() => setStockTab('returns')}>
-                  Returns
-                </button>
+                {(['orders', 'transfers', 'returns'] as StockTab[]).map((t) => (
+                  <button key={t} className={`sh-tab ${stockTab === t ? 'active' : ''}`} onClick={() => setStockTab(t)}>
+                    {cap(t)}
+                  </button>
+                ))}
               </div>
               <div className="subbar-row">
                 <span>
                   Create, manage and update purchase orders or receive stock. <span className="rlink">Need help?</span>
                 </span>
                 <div className="page-actions">
-                  {stockTab === 'returns' && (
-                    <button className="btn-s" onClick={handleCreateReturn}>
-                      Create return
+                  {stockTab !== 'orders' && (
+                    <button className="btn-s" onClick={() => navigate(newPath[stockTab])}>
+                      {stockTab === 'transfers' ? 'Transfer stock' : 'Return stock'}
                     </button>
                   )}
-                  <button className="btn-s" onClick={handleReceiveStock}>
+                  <button className="btn-s" onClick={() => navigate('/inventory/receive')}>
                     Receive stock
                   </button>
-                  <button className="btn-p" onClick={handleOrderStock}>
+                  <button className="btn-p" onClick={() => navigate('/inventory/orders/new')}>
                     Order stock
                   </button>
                 </div>
               </div>
+
+              {onboarding && (
+                <div className="onb-cards">
+                  <div className="onb-card single">
+                    <InventoryGraphic />
+                    <div>
+                      <div className="onb-h">Update inventory levels to get selling.</div>
+                      <div className="onb-t">
+                        Receive stock from your suppliers to set the inventory levels of the products you sell. Every order you
+                        receive updates stock on hand, so your counts and reports stay accurate.
+                      </div>
+                      <div className="onb-actions">
+                        <button className="btn-s" onClick={() => navigate('/inventory/receive')}>
+                          Get started
+                        </button>
+                        <span className="rlink" onClick={dismissOnboarding}>
+                          Dismiss
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="sc-filter-card">
                 <div className="sc-frow">
@@ -259,10 +214,11 @@ export function InventoryPage() {
                     </select>
                   </div>
                   <div className="f-field">
-                    <label>Search orders</label>
+                    <label>Search {stockTab}</label>
                     <input
-                      value={q}
-                      onChange={(e) => setQ(e.target.value)}
+                      value={qDraft}
+                      onChange={(e) => setQDraft(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && setQ(qDraft)}
                       placeholder="Enter order number, supplier invoice number, note or product"
                     />
                   </div>
@@ -325,71 +281,61 @@ export function InventoryPage() {
                     </div>
                   </div>
                 )}
-                <div className="sc-factions">
-                  <span className="rlink" onClick={clearFilters}>
-                    Clear filters
+                <div className="sc-factions split">
+                  <span className="sc-links">
+                    <span className="rlink" onClick={clearFilters}>
+                      Clear filters
+                    </span>
+                    <span className="rlink" onClick={() => setShowAllFilters((v) => !v)}>
+                      {showAllFilters ? 'Less filters' : 'More filters'}
+                    </span>
                   </span>
-                  <span className="rlink" onClick={() => setShowAllFilters((v) => !v)}>
-                    {showAllFilters ? 'Less filters' : 'More filters'}
-                  </span>
+                  <button className="btn-p" onClick={() => setQ(qDraft)}>
+                    Search
+                  </button>
                 </div>
               </div>
 
+              <div className="inv-count">
+                Displaying {totalQty} total qty and {fmt(totalCost)} total cost
+              </div>
               {currentList.length > 0 ? (
-                <>
-                  <div className="inv-count">
-                    Displaying {currentList.length} {stockTab === 'orders' ? 'order' : stockTab === 'transfers' ? 'transfer' : 'return'}
-                    {currentList.length === 1 ? '' : 's'} · {currentList.reduce((s, o) => s + txQty(o), 0)} total qty
-                  </div>
-                  <div className="atable">
-                    <div className="inv-thead">
-                      <span className="s">{stockTab === 'orders' ? 'Order' : stockTab === 'transfers' ? 'Transfer' : 'Return'} number</span>
-                      <span className="s">From</span>
-                      <span className="s">To</span>
-                      <span className="s">Status</span>
-                      <span className="s">Created</span>
-                      <span className="s r">Total qty.</span>
-                      <span />
-                    </div>
-                    {currentList.map((o) => (
-                      <div key={o.id} className="inv-row">
-                        <span className="rlink" onClick={() => startEditTx(o)} style={{ cursor: 'pointer', fontWeight: 600 }}>
-                          {o.number}
-                        </span>
-                        <span>{o.from}</span>
-                        <span>{o.to}</span>
-                        <span>
-                          <span style={statusBadge(o.status)}>{o.status}</span>
-                        </span>
-                        <span>{new Date(o.createdAt).toLocaleDateString()}</span>
-                        <span className="r">{txQty(o)}</span>
-                        <span className="r">
-                          {(o.status === 'Open' || o.status === 'Sent') && (
-                            <span
-                              className="rlink"
-                              onClick={() => {
-                                if (window.confirm(`Receive ${o.number} — add ${txQty(o)} units into ${o.to}? This updates stock on hand.`)) receiveTx(o.id);
-                              }}
-                            >
-                              Receive
-                            </span>
-                          )}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="inv-count">Displaying 0 {stockTab} · 0 total qty</div>
-                  <div className="inv-thead standalone">
-                    <span className="s">Order number</span>
+                <div className="atable">
+                  <div className="inv-thead inv7">
+                    <span className="s">{cap(WORD[stockTab])} number</span>
                     <span className="s">From</span>
                     <span className="s">To</span>
                     <span className="s">Status</span>
                     <span className="s">Created</span>
                     <span className="s r">Total qty.</span>
-                    <span />
+                    <span className="s r">Total cost</span>
+                  </div>
+                  {currentList.map((o) => (
+                    <div key={o.id} className="inv-row inv7">
+                      <span className="rlink strong" onClick={() => navigate(`/inventory/stock/${o.id}`)}>
+                        {o.number}
+                      </span>
+                      <span>{o.from || '—'}</span>
+                      <span>{o.to || '—'}</span>
+                      <span>
+                        <span className={`tx-badge ${o.status.toLowerCase()}`}>{o.status}</span>
+                      </span>
+                      <span>{new Date(o.createdAt).toLocaleDateString()}</span>
+                      <span className="r">{txQty(o)}</span>
+                      <span className="r">{fmt(txTotal(o))}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <>
+                  <div className="inv-thead standalone inv7">
+                    <span className="s">{cap(WORD[stockTab])} number</span>
+                    <span className="s">From</span>
+                    <span className="s">To</span>
+                    <span className="s">Status</span>
+                    <span className="s">Created</span>
+                    <span className="s r">Total qty.</span>
+                    <span className="s r">Total cost</span>
                   </div>
                   <div className="astate">
                     <CatBox />
@@ -407,20 +353,23 @@ export function InventoryPage() {
               </div>
               <div className="sh-tabs">
                 <button className={`sh-tab ${countTab === 'due' ? 'active' : ''}`} onClick={() => setCountTab('due')}>
-                  Due ({dueCounts.length})
+                  Due ({byBucket('due').length})
+                </button>
+                <button className={`sh-tab ${countTab === 'upcoming' ? 'active' : ''}`} onClick={() => setCountTab('upcoming')}>
+                  Upcoming ({byBucket('upcoming').length})
                 </button>
                 <button className={`sh-tab ${countTab === 'completed' ? 'active' : ''}`} onClick={() => setCountTab('completed')}>
-                  Completed ({completedCounts.length})
+                  Completed
                 </button>
                 <button className={`sh-tab ${countTab === 'canceled' ? 'active' : ''}`} onClick={() => setCountTab('canceled')}>
-                  Canceled ({canceledCounts.length})
+                  Canceled
                 </button>
               </div>
               <div className="subbar-row">
                 <span>
                   Create, schedule and complete counts to keep track of your inventory. <span className="rlink">Need help?</span>
                 </span>
-                <button className="btn-p" onClick={addCount}>
+                <button className="btn-p" onClick={() => navigate('/inventory/counts/new')}>
                   Add inventory count
                 </button>
               </div>
@@ -444,43 +393,42 @@ export function InventoryPage() {
               )}
 
               {visibleCounts.length > 0 ? (
-                <>
-                  <div className="cnt2-head act">
+                <div className="atable">
+                  <div className="cnt2-head sch">
                     <span className="s">Name</span>
                     <span className="s">Outlet</span>
+                    <span className="s">{countTab === 'completed' ? 'Completed' : 'Scheduled'}</span>
                     <span className="s r">Status</span>
-                    <span />
                   </div>
                   {visibleCounts.map((c) => (
-                    <div key={c.id} className="cnt2-row act">
+                    <div key={c.id} className="cnt2-row sch">
                       <span className="cnt-name">
-                        <span className="rlink">{c.name}</span>
+                        <span className="rlink" onClick={() => navigate(`/inventory/counts/${c.id}`)}>{c.name}</span>
                         <span className="cnt-meta">
-                          {c.status === 'In progress' && <span className="chip-inprog">In progress</span>}{' '}
-                          {new Date(c.createdAt).toLocaleString()}
+                          {c.countType === 'full' ? 'Full count' : 'Partial count'}
+                          {c.status === 'In progress' && (
+                            <>
+                              {' '}
+                              <span className="chip-inprog">In progress</span>
+                            </>
+                          )}
                         </span>
                       </span>
                       <span>{c.outlet}</span>
-                      <span className="r">{c.status}</span>
-                      <span className="cnt-actions">
-                        {c.status === 'In progress' && (
-                          <>
-                            <span className="rlink" onClick={() => updateCount(c.id, { status: 'Completed' })}>
-                              Complete
-                            </span>
-                            <span className="rlink" onClick={() => updateCount(c.id, { status: 'Cancelled' })}>
-                              Cancel
-                            </span>
-                          </>
-                        )}
-                      </span>
+                      <span>{whenOf(countTab === 'completed' && c.completedAt ? c.completedAt : c.startAt)}</span>
+                      <span className="r">{c.status === 'Planned' ? (countTab === 'upcoming' ? 'Upcoming' : 'Due') : c.status}</span>
                     </div>
                   ))}
-                </>
+                </div>
               ) : (
                 <div className="astate">
                   <CatBox />
-                  <div>No {countTab} counts.</div>
+                  <div>{countEmpty[countTab]}</div>
+                  {countTab === 'due' && (
+                    <button className="btn-p" onClick={() => navigate('/inventory/counts/new')}>
+                      Add inventory count
+                    </button>
+                  )}
                 </div>
               )}
             </>
@@ -550,136 +498,6 @@ export function InventoryPage() {
           )}
         </div>
       </main>
-
-      {editingTxId !== null && (
-        <div className="pm-overlay" onClick={() => setEditingTxId(null)}>
-          <div className="pm" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
-            <div className="pm-head">
-              <h2>
-                Edit {txKind === 'order' ? 'Purchase Order' : txKind === 'transfer' ? 'Stock Transfer' : 'Return'}
-              </h2>
-              <button className="pm-close" onClick={() => setEditingTxId(null)} aria-label="Close">
-                ×
-              </button>
-            </div>
-            <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <div className="set-field" style={{ flex: 1 }}>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                    Reference number
-                  </label>
-                  <input
-                    className="set-input"
-                    value={txNumber}
-                    onChange={(e) => setTxNumber(e.target.value)}
-                    placeholder="e.g. PO-1001"
-                    style={{ width: '100%', boxSizing: 'border-box' }}
-                  />
-                </div>
-                <div className="set-field" style={{ flex: 1 }}>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                    Status
-                  </label>
-                  <select
-                    className="set-select"
-                    value={txStatus}
-                    onChange={(e) => setTxStatus(e.target.value as StockTxStatus)}
-                    style={{ width: '100%', boxSizing: 'border-box', height: '40px' }}
-                  >
-                    {TX_STATUSES.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <div className="set-field" style={{ flex: 1 }}>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                    Source / From
-                  </label>
-                  <input
-                    className="set-input"
-                    value={txFrom}
-                    onChange={(e) => setTxFrom(e.target.value)}
-                    placeholder="Source outlet or supplier"
-                    style={{ width: '100%', boxSizing: 'border-box' }}
-                  />
-                </div>
-                <div className="set-field" style={{ flex: 1 }}>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                    Destination / To
-                  </label>
-                  <input
-                    className="set-input"
-                    value={txTo}
-                    onChange={(e) => setTxTo(e.target.value)}
-                    placeholder="Destination outlet"
-                    style={{ width: '100%', boxSizing: 'border-box' }}
-                  />
-                </div>
-              </div>
-
-              <div className="set-field">
-                <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                  Products ({txLines.reduce((s, l) => s + l.quantity, 0)} total qty)
-                </label>
-                {txLines.length > 0 ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {txLines.map((l, i) => (
-                      <div key={l.productId} className="txline-row">
-                        <span className="txline-name">{l.name}</span>
-                        <input
-                          className="set-input"
-                          type="number"
-                          min={0}
-                          value={l.quantity}
-                          onChange={(e) =>
-                            setTxLines((lines) =>
-                              lines.map((x, xi) => (xi === i ? { ...x, quantity: Math.max(0, Number(e.target.value)) } : x)),
-                            )
-                          }
-                        />
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <span style={{ fontSize: '13px', color: 'var(--muted)' }}>
-                    No products in your catalog yet — add products first to build stock transactions with lines.
-                  </span>
-                )}
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '12px', alignItems: 'center' }}>
-                <button
-                  type="button"
-                  onClick={deleteTx}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#e11d48',
-                    cursor: 'pointer',
-                    fontWeight: 600,
-                    fontSize: '14px',
-                    padding: '8px 0',
-                    outline: 'none',
-                  }}
-                >
-                  Delete Transaction
-                </button>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <button className="btn-s" onClick={() => setEditingTxId(null)} type="button">
-                    Cancel
-                  </button>
-                  <button className="btn-p" onClick={saveTxEdit} disabled={!txNumber.trim()} type="button">
-                    Save changes
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

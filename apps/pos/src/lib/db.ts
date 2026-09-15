@@ -42,6 +42,21 @@ const delBy  = (table: string, col: string, val: string) =>
 const saveSingleton = (table: string, id: string, patch: Row) =>
   write({ table, kind: 'upsert', payload: { id, ...patch }, scope: `${table}.save` });
 
+/**
+ * Whether `table` has `column`. PostgREST validates the selected column even
+ * on an empty table, so this works before the first row exists. Stores call
+ * it on sync so a write never sends a column an older schema would reject.
+ * null = couldn't tell (offline / other error).
+ */
+async function hasColumn(table: string, column: string): Promise<boolean | null> {
+  if (!ok()) return null;
+  const { error } = await supabase.from(table).select(column).limit(1);
+  if (!error) return true;
+  if (error.message.includes(column)) return false;
+  reportDbError(`${table}.probe`, error.message);
+  return null;
+}
+
 // ─── Settings ────────────────────────────────────────────────────────────────
 export const dbSettings = {
   async get() {
@@ -243,6 +258,8 @@ export const dbStockTx = {
   },
   upsert: (row: Row) => upsert('stock_transactions', row),
   del: (id: string) => delBy('stock_transactions', 'id', id),
+  /** Whether the table has the `details` column (migration 0007). */
+  hasDetails: () => hasColumn('stock_transactions', 'details'),
 };
 
 // ─── Inventory Counts ────────────────────────────────────────────────────────
@@ -260,6 +277,9 @@ export const dbInventoryCounts = {
     return data ?? [];
   },
   upsert: (row: Row) => upsert('inventory_counts', row),
+  del: (id: string) => delBy('inventory_counts', 'id', id),
+  /** Whether the table has the `details` column (migration 0007). */
+  hasDetails: () => hasColumn('inventory_counts', 'details'),
 };
 
 // ─── Register Session ─────────────────────────────────────────────────────────
@@ -320,4 +340,27 @@ export const dbAdjustmentReasons = {
   },
   upsert: (row: Row) => upsert('adjustment_reasons', row),
   del: (id: string) => delBy('adjustment_reasons', 'id', id),
+  /** Whether the table has the `enabled` column (migration 0007). */
+  hasEnabled: () => hasColumn('adjustment_reasons', 'enabled'),
+};
+
+// ─── Product tags ────────────────────────────────────────────────────────────
+export const dbProductTags = {
+  /**
+   * All tag rows. Returns 'missing' when the table doesn't exist yet
+   * (migration 0007 not run) so the store can fall back to local tags
+   * without raising a sync toast on every boot.
+   */
+  async list(): Promise<Row[] | 'missing' | null> {
+    if (!ok()) return null;
+    const { data, error } = await supabase.from('product_tags').select('*').order('created_at');
+    if (error) {
+      if (/product_tags/.test(error.message)) return 'missing';
+      reportDbError('product_tags.list', error.message);
+      return null;
+    }
+    return data ?? [];
+  },
+  upsert: (row: Row) => upsert('product_tags', row),
+  del: (id: string) => delBy('product_tags', 'id', id),
 };

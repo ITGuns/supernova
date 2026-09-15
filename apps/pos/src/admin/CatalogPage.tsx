@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { fmt } from '../lib/format';
 import { ContextNav, type ContextItem } from '../shell/ContextNav';
-import { useAdjustmentReasons } from '../store/adjustmentReasonsStore';
-import { DEFAULT_CATEGORY_ID, useCatalogMeta } from '../store/catalogMetaStore';
+import { useAdjustmentReasons, type AdjustmentType } from '../store/adjustmentReasonsStore';
+import { DEFAULT_CATEGORY_ID, categoryDescendantIds, categoryLabel, sortedCategories, useCatalogMeta } from '../store/catalogMetaStore';
+import { tagKey, useProductTags } from '../store/tagStore';
 import { availableOf, useProducts, type Product } from '../store/productStore';
 import '../styles/catalog.css';
 import { Switch } from './controls';
@@ -125,10 +126,28 @@ export function CatalogPage() {
   // Adjustment reasons — persisted
   const reasons = useAdjustmentReasons((s) => s.reasons);
   const addReason = useAdjustmentReasons((s) => s.addReason);
+  const updateReason = useAdjustmentReasons((s) => s.updateReason);
   const deleteReason = useAdjustmentReasons((s) => s.deleteReason);
-  const [showAddReason, setShowAddReason] = useState(false);
-  const [reasonName, setReasonName] = useState('');
-  const [reasonType, setReasonType] = useState('Decrease stock');
+  const [reasonModal, setReasonModal] = useState<{ id: string; name: string; type: AdjustmentType; enabled: boolean } | null>(null);
+
+  // Product tags — persisted; every tag a product carries has a row of its own too
+  const tags = useProductTags((s) => s.tags);
+  const addTag = useProductTags((s) => s.addTag);
+  const renameTag = useProductTags((s) => s.renameTag);
+  const deleteTag = useProductTags((s) => s.deleteTag);
+  const ensureTags = useProductTags((s) => s.ensureTags);
+  useEffect(() => {
+    ensureTags(products.flatMap((p) => p.tags ?? []));
+  }, [products, ensureTags]);
+  const [tagModal, setTagModal] = useState<{ id: string; name: string } | null>(null);
+  const [tagError, setTagError] = useState('');
+  const [tagAsc, setTagAsc] = useState(true);
+  const [catAsc, setCatAsc] = useState(true);
+  const tagCount = (name: string) => products.filter((p) => (p.tags ?? []).some((t) => tagKey(t) === tagKey(name))).length;
+  const catCount = (id: string) => {
+    const ids = categoryDescendantIds(categories, id);
+    return products.filter((p) => ids.has(p.categoryId)).length;
+  };
 
   // Filters State
   const [selectedCategory, setSelectedCategory] = useState('all');
@@ -159,15 +178,18 @@ export function CatalogPage() {
 
   const label = NAV.find((n) => n.key === active)?.label ?? 'Catalog';
 
-  const tagTokens = tagQ.toLowerCase().split(/[\s,]+/).filter(Boolean);
+  // "Tags" filter: comma-separated tag names the product must all carry.
+  const tagTokens = tagQ.split(',').map((t) => tagKey(t)).filter(Boolean);
+  // A category filter includes the levels nested under it.
+  const categoryIds = selectedCategory === 'all' ? null : categoryDescendantIds(categories, selectedCategory);
   const rows = products.filter((p) => {
-    const hay = `${p.name} ${p.sku}`.toLowerCase();
+    const ptags = (p.tags ?? []).map(tagKey);
     return (
       (q.trim() === '' ||
         p.name.toLowerCase().includes(q.toLowerCase()) ||
         p.sku.toLowerCase().includes(q.toLowerCase())) &&
-      tagTokens.every((t) => hay.includes(t)) &&
-      (selectedCategory === 'all' || p.categoryId === selectedCategory) &&
+      tagTokens.every((t) => ptags.some((pt) => pt === t || pt.includes(t))) &&
+      (categoryIds === null || categoryIds.has(p.categoryId)) &&
       (selectedBrand === 'all' || p.brand === selectedBrand) &&
       (selectedSupplier === 'all' || p.supplier === selectedSupplier) &&
       (selectedStatus === 'all' || (selectedStatus === 'active') === p.enabled)
@@ -215,11 +237,50 @@ export function CatalogPage() {
     setEditingEntity(null);
   };
 
-  const submitAddReason = () => {
-    if (!reasonName.trim()) return;
-    addReason(reasonName.trim(), reasonType);
-    setReasonName('');
-    setShowAddReason(false);
+  const saveReason = () => {
+    if (!reasonModal || !reasonModal.name.trim()) return;
+    if (reasonModal.id) {
+      updateReason(reasonModal.id, { name: reasonModal.name.trim(), type: reasonModal.type, enabled: reasonModal.enabled });
+    } else {
+      addReason(reasonModal.name.trim(), reasonModal.type);
+    }
+    setReasonModal(null);
+  };
+
+  const saveTag = () => {
+    if (!tagModal) return;
+    const name = tagModal.name.trim();
+    if (!name) return;
+    const ok = tagModal.id ? renameTag(tagModal.id, name) : addTag(name) !== null;
+    if (!ok) {
+      setTagError(`A tag called “${name}” already exists.`);
+      return;
+    }
+    setTagModal(null);
+    setTagError('');
+  };
+
+  const removeTag = (id: string) => {
+    const tag = tags.find((t) => t.id === id);
+    if (!tag) return;
+    const n = tagCount(tag.name);
+    if (n > 0 && !window.confirm(`Delete the tag “${tag.name}”? It will be removed from ${n} product${n === 1 ? '' : 's'}.`)) return;
+    deleteTag(id);
+  };
+
+  const removeCategory = (id: string) => {
+    if (!categories.some((c) => c.id === id)) return;
+    const n = catCount(id);
+    if (n > 0 && !window.confirm(`Delete “${categoryLabel(categories, id)}”? ${n} product${n === 1 ? '' : 's'} will move to your first top-level category.`)) return;
+    const gone = categoryDescendantIds(categories, id);
+    const fallback = categories.find((c) => !gone.has(c.id) && !c.parentId)?.id ?? DEFAULT_CATEGORY_ID;
+    products.filter((p) => gone.has(p.categoryId)).forEach((p) => updP(p.id, { categoryId: fallback }));
+    removeEntity('categories', id);
+  };
+
+  const viewTagProducts = (name: string) => {
+    setTagQ(name);
+    setActive('products');
   };
 
   const exportProducts = () => {
@@ -431,41 +492,94 @@ export function CatalogPage() {
                   ))}
               </div>
             </>
+          ) : active === 'tags' ? (
+            <>
+              <h1 className="page-title">Product tags</h1>
+              <div className="cat-band">
+                <span>
+                  A list of all of your product tags. <span className="rlink">Need help?</span>
+                </span>
+                <button className="btn-p" onClick={() => { setTagModal({ id: '', name: '' }); setTagError(''); }}>
+                  Add tag
+                </button>
+              </div>
+              <div className="ctable">
+                <div className="cthead tag3">
+                  <span className="cth-s" onClick={() => setTagAsc((v) => !v)}>
+                    <span className="cth-label">Name</span>
+                    <SortIcon dir={tagAsc ? 'asc' : 'desc'} />
+                  </span>
+                  <span>Number of products</span>
+                  <span />
+                </div>
+                {tags.length === 0 && <div className="ct-empty">No product tags yet. Add a tag, or tag a product from its page.</div>}
+                {[...tags]
+                  .sort((a, b) => (tagAsc ? 1 : -1) * a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
+                  .map((t) => (
+                    <div key={t.id} className="ctrow tag3">
+                      <span className="rlink" onClick={() => { setTagModal({ id: t.id, name: t.name }); setTagError(''); }}>
+                        {t.name}
+                      </span>
+                      <span>{tagCount(t.name)}</span>
+                      <span className="ct-actions">
+                        <span className="rlink" onClick={() => viewTagProducts(t.name)}>
+                          View products
+                        </span>
+                        <span
+                          className="ic-edit"
+                          title="Edit"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setTagModal({ id: t.id, name: t.name });
+                            setTagError('');
+                          }}
+                        >
+                          ✎
+                        </span>
+                        <span
+                          className="ic-del"
+                          title="Delete"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeTag(t.id);
+                          }}
+                        >
+                          🗑
+                        </span>
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </>
           ) : active === 'categories' ? (
             <>
-              <div className="page-head">
-                <h1 className="page-title">Product categories</h1>
-                <button
-                  className="btn-p"
-                  onClick={() => setEditingEntity({ type: 'category', id: '', name: '', isNew: true })}
-                >
+              <h1 className="page-title">Product categories</h1>
+              <div className="cat-band">
+                <span>
+                  A list of all of your product categories. <span className="rlink">Need help?</span>
+                </span>
+                <button className="btn-p" onClick={() => navigate('/catalog/categories/new')}>
                   Add category
                 </button>
               </div>
-              <div className="page-subbar">A list of all of your product categories.</div>
-              <div className="atable">
-                <div className="athead pcat">
-                  <span>Name</span>
-                  <span className="r">Number of products</span>
+              <div className="ctable">
+                <div className="cthead tag3">
+                  <span className="cth-s" onClick={() => setCatAsc((v) => !v)}>
+                    <span className="cth-label">Name</span>
+                    <SortIcon dir={catAsc ? 'asc' : 'desc'} />
+                  </span>
+                  <span>Number of products</span>
                   <span />
                 </div>
-                {categories.map((c) => (
-                  <div key={c.id} className="arow pcat">
-                    <span
-                      className="rlink"
-                      onClick={() => {
-                        setSelectedCategory(c.id);
-                        setActive('products');
-                      }}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      {c.name}
+                {(catAsc ? sortedCategories(categories) : sortedCategories(categories).reverse()).map((c) => (
+                  <div key={c.id} className="ctrow tag3">
+                    <span className={`rlink ${c.parentId ? 'ct-nested' : ''}`} onClick={() => navigate(`/catalog/categories/${c.id}`)}>
+                      {categoryLabel(categories, c.id)}
                     </span>
-                    <span className="r">{products.filter((p) => p.categoryId === c.id).length}</span>
-                    <span className="row-actions">
+                    <span>{catCount(c.id)}</span>
+                    <span className="ct-actions">
                       <span
                         className="rlink"
-                        style={{ cursor: 'pointer' }}
                         onClick={() => {
                           setSelectedCategory(c.id);
                           setActive('products');
@@ -474,21 +588,21 @@ export function CatalogPage() {
                         View products
                       </span>
                       <span
-                        className="ic"
-                        style={{ cursor: 'pointer' }}
+                        className="ic-edit"
+                        title="Edit"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setEditingEntity({ type: 'category', id: c.id, name: c.name });
+                          navigate(`/catalog/categories/${c.id}`);
                         }}
                       >
                         ✎
                       </span>
                       <span
-                        className="ic"
-                        style={{ cursor: 'pointer' }}
+                        className="ic-del"
+                        title="Delete"
                         onClick={(e) => {
                           e.stopPropagation();
-                          deleteEntity('category', c.id);
+                          removeCategory(c.id);
                         }}
                       >
                         🗑
@@ -501,56 +615,53 @@ export function CatalogPage() {
           ) : active === 'adjustment' ? (
             <>
               <h1 className="page-title">Adjustment reasons</h1>
-              <div className="page-head">
-                <span className="page-subbar" style={{ flex: 1, marginBottom: 0 }}>
-                  Use adjustment reasons to track your inventory movements.
-                </span>
-                <button className="btn-p" onClick={() => setShowAddReason((v) => !v)}>
+              <div className="cat-band">
+                <span>Use adjustment reasons to track your inventory movements.</span>
+                <button className="btn-p" onClick={() => setReasonModal({ id: '', name: '', type: 'Negative', enabled: true })}>
                   Add reason
                 </button>
               </div>
-              {showAddReason && (
-                <div className="add-bar">
-                  <input
-                    className="set-input"
-                    value={reasonName}
-                    onChange={(e) => setReasonName(e.target.value)}
-                    placeholder="Reason name, e.g. Damaged"
-                    style={{ flex: 1 }}
-                  />
-                  <select
-                    className="set-select"
-                    value={reasonType}
-                    onChange={(e) => setReasonType(e.target.value)}
-                    style={{ height: '40px' }}
-                  >
-                    <option value="Decrease stock">Decrease stock</option>
-                    <option value="Increase stock">Increase stock</option>
-                  </select>
-                  <button className="btn-p" onClick={submitAddReason} disabled={!reasonName.trim()}>
-                    Save reason
-                  </button>
-                </div>
-              )}
-              <div className="atable">
-                <div className="athead adj4">
+              <div className="ctable">
+                <div className="cthead adj4c">
                   <span>Name</span>
                   <span>Adjustment type</span>
                   <span className="c">Enabled</span>
                   <span />
                 </div>
-                {reasons.map((a) => (
-                  <div key={a.id} className="arow adj4">
-                    <span>{a.name}</span>
-                    <span>{a.type}</span>
-                    <span className="c ok-check">✓</span>
-                    <span className="row-actions">
-                      <span className="ic" style={{ cursor: 'pointer' }} onClick={() => deleteReason(a.id)}>
-                        🗑
+                {reasons.length === 0 && <div className="ct-empty">No adjustment reasons yet.</div>}
+                {[...reasons]
+                  .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
+                  .map((a) => (
+                    <div key={a.id} className={`ctrow adj4c ${a.enabled ? '' : 'ct-off'}`}>
+                      <span className="rlink" onClick={() => setReasonModal({ id: a.id, name: a.name, type: a.type, enabled: a.enabled })}>
+                        {a.name}
                       </span>
-                    </span>
-                  </div>
-                ))}
+                      <span>{a.type}</span>
+                      <span className="c">{a.enabled ? <span className="ok-check">✓</span> : <span className="ct-muted">—</span>}</span>
+                      <span className="ct-actions">
+                        <span
+                          className="ic-edit"
+                          title="Edit"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setReasonModal({ id: a.id, name: a.name, type: a.type, enabled: a.enabled });
+                          }}
+                        >
+                          ✎
+                        </span>
+                        <span
+                          className="ic-del"
+                          title="Delete"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteReason(a.id);
+                          }}
+                        >
+                          🗑
+                        </span>
+                      </span>
+                    </div>
+                  ))}
               </div>
             </>
           ) : active === 'giftcards' ? (
@@ -671,8 +782,8 @@ export function CatalogPage() {
                       style={{ height: '40px', background: 'var(--panel)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: '6px', padding: '0 8px' }}
                     >
                       <option value="all">All categories</option>
-                      {categories.map((c) => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
+                      {sortedCategories(categories).map((c) => (
+                        <option key={c.id} value={c.id}>{categoryLabel(categories, c.id)}</option>
                       ))}
                     </select>
                   </div>
@@ -920,6 +1031,138 @@ export function CatalogPage() {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {tagModal !== null && (
+        <div className="pm-overlay" onClick={() => setTagModal(null)}>
+          <div className="pm" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '440px' }}>
+            <div className="pm-head">
+              <h2>{tagModal.id ? 'Edit product tag' : 'Add product tag'}</h2>
+              <button className="pm-close" onClick={() => setTagModal(null)} aria-label="Close">
+                ×
+              </button>
+            </div>
+            <form
+              className="pm-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                saveTag();
+              }}
+            >
+              <label className="pm-field">
+                <span className="pm-label">Tag name</span>
+                <input
+                  className="set-input"
+                  value={tagModal.name}
+                  onChange={(e) => {
+                    setTagModal({ ...tagModal, name: e.target.value });
+                    setTagError('');
+                  }}
+                  placeholder="Enter a tag name"
+                  autoFocus
+                />
+              </label>
+              {tagError && <div className="pm-error" role="alert">{tagError}</div>}
+              <div className="pm-foot">
+                <span />
+                <span className="page-actions">
+                  <button className="btn-s" type="button" onClick={() => setTagModal(null)}>
+                    Cancel
+                  </button>
+                  <button className="btn-p" type="submit" disabled={!tagModal.name.trim()}>
+                    {tagModal.id ? 'Save' : 'Add tag'}
+                  </button>
+                </span>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {reasonModal !== null && (
+        <div className="pm-overlay" onClick={() => setReasonModal(null)}>
+          <div className="pm" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+            <div className="pm-head">
+              <h2>{reasonModal.id ? 'Edit adjustment reason' : 'Add adjustment reason'}</h2>
+              <button className="pm-close" onClick={() => setReasonModal(null)} aria-label="Close">
+                ×
+              </button>
+            </div>
+            <form
+              className="pm-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                saveReason();
+              }}
+            >
+              <div className="pm-field">
+                <span className="pm-label">Adjustment type and name</span>
+                <div className="pm-inputrow">
+                  <span className="seg2" role="group" aria-label="Adjustment type">
+                    <button
+                      type="button"
+                      className={reasonModal.type === 'Positive' ? 'active' : ''}
+                      title="Positive — adds stock"
+                      aria-pressed={reasonModal.type === 'Positive'}
+                      onClick={() => setReasonModal({ ...reasonModal, type: 'Positive' })}
+                    >
+                      +
+                    </button>
+                    <button
+                      type="button"
+                      className={reasonModal.type === 'Negative' ? 'active' : ''}
+                      title="Negative — removes stock"
+                      aria-pressed={reasonModal.type === 'Negative'}
+                      onClick={() => setReasonModal({ ...reasonModal, type: 'Negative' })}
+                    >
+                      −
+                    </button>
+                  </span>
+                  <input
+                    className="set-input"
+                    value={reasonModal.name}
+                    onChange={(e) => setReasonModal({ ...reasonModal, name: e.target.value })}
+                    placeholder="Enter reason name"
+                    autoFocus
+                  />
+                </div>
+                <span className="pm-hint">
+                  {reasonModal.type === 'Positive' ? 'Positive: this reason adds stock on hand.' : 'Negative: this reason removes stock on hand.'}
+                </span>
+              </div>
+              {reasonModal.id && (
+                <label className="pm-switch">
+                  <span>Enabled</span>
+                  <Switch on={reasonModal.enabled} onClick={() => setReasonModal({ ...reasonModal, enabled: !reasonModal.enabled })} />
+                </label>
+              )}
+              <div className="pm-foot">
+                {reasonModal.id ? (
+                  <button
+                    type="button"
+                    className="rlink pm-danger"
+                    onClick={() => {
+                      deleteReason(reasonModal.id);
+                      setReasonModal(null);
+                    }}
+                  >
+                    Delete
+                  </button>
+                ) : (
+                  <span />
+                )}
+                <span className="page-actions">
+                  <button className="btn-s" type="button" onClick={() => setReasonModal(null)}>
+                    Cancel
+                  </button>
+                  <button className="btn-p" type="submit" disabled={!reasonModal.name.trim()}>
+                    {reasonModal.id ? 'Save' : 'Add reason'}
+                  </button>
+                </span>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { fmt } from '../lib/format';
-import { useCatalogMeta } from '../store/catalogMetaStore';
+import { categoryLabel, sortedCategories, useCatalogMeta } from '../store/catalogMetaStore';
+import { tagKey, useProductTags } from '../store/tagStore';
 import {
   EMPTY_SHIPPING,
   availableOf,
@@ -225,6 +226,8 @@ export function ProductEditor() {
   const brands = useCatalogMeta((s) => s.brands);
   const suppliers = useCatalogMeta((s) => s.suppliers);
   const addEntity = useCatalogMeta((s) => s.addEntity);
+  const knownTags = useProductTags((s) => s.tags);
+  const ensureTags = useProductTags((s) => s.ensureTags);
   const taxes = useSettings((s) => s.taxes);
   const defaultTaxLabel = useSettings((s) => s.defaultTaxLabel);
   const outlets = useSetup((s) => s.outlets);
@@ -243,6 +246,14 @@ export function ProductEditor() {
   const [tab, setTab] = useState<'general' | 'shipping'>('general');
   const [catalogQuery, setCatalogQuery] = useState('');
   const [tagInput, setTagInput] = useState('');
+  const commitTag = () => {
+    const typed = tagInput.trim().replace(/,$/, '').trim();
+    if (!typed) return;
+    const known = knownTags.find((t) => tagKey(t.name) === tagKey(typed));
+    const t = known ? known.name : typed;
+    if (!draft.tags.some((x) => tagKey(x) === tagKey(t))) set({ tags: [...draft.tags, t] });
+    setTagInput('');
+  };
   const [newBrand, setNewBrand] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState('');
@@ -362,6 +373,7 @@ export function ProductEditor() {
       return;
     }
     const common = base();
+    ensureTags(draft.tags);
 
     if (existing) {
       updateProduct(existing.id, {
@@ -515,21 +527,26 @@ export function ProductEditor() {
                     className="pe-input pe-taginput"
                     value={tagInput}
                     placeholder="Enter a tag name"
+                    list="pe-tag-options"
                     onChange={(e) => setTagInput(e.target.value)}
                     onKeyDown={(e) => {
                       if ((e.key === 'Enter' || e.key === ',') && tagInput.trim()) {
                         e.preventDefault();
-                        const t = tagInput.trim().replace(/,$/, '');
-                        if (t && !draft.tags.includes(t)) set({ tags: [...draft.tags, t] });
-                        setTagInput('');
+                        commitTag();
                       }
                     }}
+                    onBlur={commitTag}
                   />
+                  <datalist id="pe-tag-options">
+                    {knownTags
+                      .filter((t) => !draft.tags.some((x) => tagKey(x) === tagKey(t.name)))
+                      .map((t) => <option key={t.id} value={t.name} />)}
+                  </datalist>
                 </div>
               </Field>
               <Field label="Product category" hint="Use category levels to filter your sales and inventory reports" wide>
                 <select className="pe-input" value={draft.categoryId} onChange={(e) => set({ categoryId: e.target.value })}>
-                  {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {sortedCategories(categories).map((c) => <option key={c.id} value={c.id}>{categoryLabel(categories, c.id)}</option>)}
                 </select>
               </Field>
               <label className="pe-check">

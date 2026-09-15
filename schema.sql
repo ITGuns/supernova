@@ -264,7 +264,9 @@ create table if not exists stock_transactions (
   status      text not null default 'Draft',
   created_at  timestamptz not null default now(),
   due_at      timestamptz,
-  lines       jsonb not null default '[]'
+  lines       jsonb not null default '[]',
+  -- Purchase order / receipt form data (migration 0007)
+  details     jsonb not null default '{}'
 );
 
 -- ── Inventory Counts ─────────────────────────────────────────
@@ -273,7 +275,9 @@ create table if not exists inventory_counts (
   name        text not null,
   outlet      text not null default '',
   status      text not null default 'In progress',
-  created_at  timestamptz not null default now()
+  created_at  timestamptz not null default now(),
+  -- Schedule, product filters and counted lines (migration 0007)
+  details     jsonb not null default '{}'
 );
 
 -- ── Register Sessions ────────────────────────────────────────
@@ -320,9 +324,29 @@ create or replace trigger security_config_updated_at
 
 -- ── Adjustment Reasons ───────────────────────────────────────
 create table if not exists adjustment_reasons (
-  id    text primary key,
-  name  text not null,
-  kind  text not null default 'loss'
+  id       text primary key,
+  name     text not null,
+  kind     text not null default 'Negative',   -- 'Positive' | 'Negative'
+  enabled  boolean not null default true
+);
+
+-- The default adjustment reasons Lightspeed ships with.
+insert into adjustment_reasons (id, name, kind, enabled) values
+  ('damage',          'Damage',          'Negative', true),
+  ('donation',        'Donation',        'Negative', true),
+  ('expiry',          'Expiry',          'Negative', true),
+  ('internal-use',    'Internal Use',    'Negative', true),
+  ('theft',           'Theft',           'Negative', true),
+  ('sample-for-sale', 'Sample For Sale', 'Positive', true),
+  ('stock-found',     'Stock Found',     'Positive', true)
+on conflict (id) do nothing;
+
+-- Product tags (migration 0007). Products also carry their tag names in
+-- products.tags; this table lets a tag exist before any product uses it.
+create table if not exists product_tags (
+  id          text primary key,
+  name        text not null,
+  created_at  timestamptz not null default now()
 );
 
 -- ── Seed singleton config rows ───────────────────────────────

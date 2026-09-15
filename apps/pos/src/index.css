@@ -47,6 +47,8 @@ input {
   --line: rgba(255, 255, 255, 0.09);
   --primary-press: #5b4dff;
   --link: #8f83ff;
+  --ok: #5ad48b;
+  --bad: #f0655c;
   --rail-bg: #161618;
   --rail-icon: #8a8a90;
   --rail-active-bg: rgba(75, 61, 245, 0.16);
@@ -62,6 +64,8 @@ input {
   --line: #e4e4e8;
   --primary-press: #3d31d6;
   --link: #3730c4;
+  --ok: #1a6b3c;
+  --bad: #b8322a;
   --rail-bg: #ffffff;
   --rail-icon: #5a5a62;
   --rail-active-bg: #edebff;

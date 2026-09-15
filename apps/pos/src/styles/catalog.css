@@ -89,3 +89,140 @@
 .txline-row input {
   width: 90px;
 }
+
+/* Product tags / categories tables (name, count, actions) */
+.cthead.tag3,
+.ctrow.tag3 {
+  grid-template-columns: 2fr 1.2fr 1.6fr;
+}
+.ct-nested {
+  padding-left: 0;
+}
+.ct-empty {
+  padding: 28px 6px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* Adjustment reasons: name, type, enabled, actions */
+.cthead.adj4c,
+.ctrow.adj4c {
+  grid-template-columns: 2fr 1.4fr 0.8fr 1.2fr;
+}
+.cthead.adj4c .c,
+.ctrow.adj4c .c {
+  text-align: center;
+}
+.ctrow.ct-off > span:first-child,
+.ctrow.ct-off > span:nth-child(2) {
+  color: var(--muted);
+}
+
+/* Small modal forms (add tag / add adjustment reason) */
+.pm-form {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.pm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pm-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.pm-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+.pm-error {
+  color: var(--bad);
+  font-size: 13px;
+}
+.pm-form .set-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.pm-inputrow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.pm-inputrow .set-input {
+  flex: 1;
+}
+.pm-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+  color: var(--text);
+  cursor: pointer;
+}
+.pm-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+}
+.pm-danger {
+  color: var(--bad);
+  border: 0;
+  background: none;
+  font-weight: 600;
+  font: inherit;
+  cursor: pointer;
+}
+.seg2 {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.seg2 button {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.seg2 button.active {
+  background: var(--primary);
+  color: #fff;
+}
+
+/* Stock control list: number, from, to, status, created, qty, cost */
+.inv-thead.inv7,
+.inv-row.inv7 {
+  grid-template-columns: 1.3fr 1.1fr 1.1fr 0.9fr 1fr 0.8fr 0.9fr;
+}
+.inv-row .rlink.strong {
+  font-weight: 600;
+}
+.sc-factions.split {
+  justify-content: space-between;
+}
+.sc-links {
+  display: flex;
+  gap: 22px;
+}
+.onb-card.single {
+  grid-column: 1 / -1;
+}
+.astate .btn-p {
+  margin-top: 16px;
+}
+
+/* Inventory counts list: name, outlet, scheduled, status */
+.cnt2-head.sch,
+.cnt2-row.sch {
+  grid-template-columns: 2.2fr 1fr 1.4fr 0.9fr;
+}
