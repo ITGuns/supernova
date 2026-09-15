@@ -100,6 +100,15 @@ export const dbCatalogMeta = {
   },
   upsert: (row: Row) => upsert('catalog_meta', row),
   del: (id: string) => delBy('catalog_meta', 'id', id),
+  /** Whether the table has the supplier `details` column (migration 0006). null = couldn't tell. */
+  async hasDetails(): Promise<boolean | null> {
+    if (!ok()) return null;
+    const { error } = await supabase.from('catalog_meta').select('details').limit(1);
+    if (!error) return true;
+    if (/details/.test(error.message)) return false;
+    reportDbError('catalog_meta.probe', error.message);
+    return null;
+  },
 };
 
 // ─── Products ────────────────────────────────────────────────────────────────

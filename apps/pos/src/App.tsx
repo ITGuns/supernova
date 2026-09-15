@@ -8,6 +8,7 @@ import { OnlinePage } from './admin/OnlinePage';
 import { ProductEditor } from './admin/ProductEditor';
 import { ReportingPage } from './admin/ReportingPage';
 import { SetupPage } from './admin/SetupPage';
+import { SupplierEditor } from './admin/SupplierEditor';
 import { AdminLayout } from './shell/AdminLayout';
 import { Login } from './shell/Login';
 import { RequireUser } from './shell/RequireUser';
@@ -51,6 +52,8 @@ export function App() {
         <Route path="/catalog" element={<CatalogPage />} />
         <Route path="/catalog/products/new" element={<ProductEditor />} />
         <Route path="/catalog/products/:id" element={<ProductEditor />} />
+        <Route path="/catalog/suppliers/new" element={<SupplierEditor />} />
+        <Route path="/catalog/suppliers/:id" element={<SupplierEditor />} />
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/customers" element={<CustomersPage />} />
         <Route path="/finance" element={<FinancePage />} />

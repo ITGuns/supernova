@@ -16,6 +16,7 @@ import {
 } from '../store/productStore';
 import { useSettings } from '../store/settingsStore';
 import { useSetup } from '../store/setupStore';
+import { Field, Section } from './FormLayout';
 import '../styles/product-editor.css';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -151,30 +152,6 @@ const intOrNull = (s: string) => (s.trim() === '' ? null : Math.max(0, parseInt(
 
 // ── Small building blocks ────────────────────────────────────────────────────
 
-function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <section className="pe-section">
-      <div className="pe-section-l">
-        <h2>{title}</h2>
-        {hint && <p>{hint}</p>}
-      </div>
-      <div className="pe-section-r">{children}</div>
-    </section>
-  );
-}
-
-function Field({ label, hint, children, wide }: { label: string; hint?: string; children: React.ReactNode; wide?: boolean }) {
-  return (
-    <label className={`pe-field ${wide ? 'wide' : ''}`}>
-      <span className="pe-label">
-        {label}
-        {hint && <span className="pe-hint"> {hint}</span>}
-      </span>
-      {children}
-    </label>
-  );
-}
-
 function ProductPicker({
   products,
   exclude,
@@ -298,6 +275,13 @@ export function ProductEditor() {
     set({ priceMinor: Math.round(cost / (1 - m)) });
   };
   const setRetailInc = (s: string) => set({ priceMinor: Math.round(toMinor(s) / (1 + taxRate)) });
+
+  // A supplier's default markup (Catalog → Suppliers) fills in the retail
+  // price the first time a cost is known, so products aren't priced from zero.
+  const markupFrom = (supplierName: string, costMinor: number, retailMinor: number): Partial<Draft> => {
+    const bps = suppliers.find((x) => x.name === supplierName)?.details?.defaultMarkupBps ?? 0;
+    return retailMinor === 0 && costMinor > 0 && bps > 0 ? { priceMinor: Math.round(costMinor * (1 + bps / 10000)) } : {};
+  };
 
   // ── Derived: variants ──────────────────────────────────────────────────
   const combos = useMemo(() => combinations(draft.attributes), [draft.attributes]);
@@ -700,7 +684,7 @@ export function ProductEditor() {
               <div className="pe-suphead"><span>Supplier</span><span>Supplier code</span><span>Supplier price</span><span /></div>
               {draft.suppliers.map((s, i) => (
                 <div key={i} className="pe-suprow">
-                  <select className="pe-input" value={s.supplier} onChange={(e) => set({ suppliers: draft.suppliers.map((x, j) => (j === i ? { ...x, supplier: e.target.value } : x)) })}>
+                  <select className="pe-input" value={s.supplier} onChange={(e) => set({ suppliers: draft.suppliers.map((x, j) => (j === i ? { ...x, supplier: e.target.value } : x)), ...(i === 0 ? markupFrom(e.target.value, draft.supplierPriceMinor, draft.priceMinor) : {}) })}>
                     <option value="">Choose a supplier</option>
                     {suppliers.map((o) => <option key={o.id} value={o.name}>{o.name}</option>)}
                   </select>
@@ -717,7 +701,7 @@ export function ProductEditor() {
                         const priceMinor = toMinor(e.target.value);
                         const next = draft.suppliers.map((x, j) => (j === i ? { ...x, priceMinor } : x));
                         // The first supplier's price is the cost used for markup and margin.
-                        set({ suppliers: next, ...(i === 0 ? { supplierPriceMinor: priceMinor } : {}) });
+                        set({ suppliers: next, ...(i === 0 ? { supplierPriceMinor: priceMinor, ...markupFrom(s.supplier, priceMinor, draft.priceMinor) } : {}) });
                       }}
                     />
                   </span>
@@ -743,7 +727,7 @@ export function ProductEditor() {
                 <tbody>
                   <tr>
                     <td>General Price Book (All Products)</td>
-                    <td><span className="pe-money"><span>$</span><input className="pe-input" type="number" step="0.01" min={0} value={money(cost)} onChange={(e) => { const v = toMinor(e.target.value); set({ supplierPriceMinor: v, suppliers: draft.suppliers.map((s, j) => (j === 0 ? { ...s, priceMinor: v } : s)) }); }} /></span></td>
+                    <td><span className="pe-money"><span>$</span><input className="pe-input" type="number" step="0.01" min={0} value={money(cost)} onChange={(e) => { const v = toMinor(e.target.value); set({ supplierPriceMinor: v, suppliers: draft.suppliers.map((s, j) => (j === 0 ? { ...s, priceMinor: v } : s)), ...markupFrom(draft.suppliers[0]?.supplier ?? '', v, draft.priceMinor) }); }} /></span></td>
                     <td className="pe-muted">–</td>
                     <td><span className="pe-money"><input className="pe-input" type="number" step="0.01" value={pct(markup)} disabled={cost === 0} onChange={(e) => setMarkup(e.target.value)} /><span>%</span></span></td>
                     <td><span className="pe-money"><input className="pe-input" type="number" step="0.01" value={pct(margin)} disabled={cost === 0} onChange={(e) => setMargin(e.target.value)} /><span>%</span></span></td>

@@ -135,3 +135,7 @@
   .pe-suphead { display: none; }
   .pe-suprow { grid-template-columns: 1fr; }
 }
+
+/* Supplier page extras */
+.pe-subhead { font-size: 15px; font-weight: 700; margin: 4px 0 12px; color: var(--text); }
+.pe-suffix .pe-input { text-align: right; }

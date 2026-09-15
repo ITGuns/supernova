@@ -95,7 +95,8 @@ export function CatalogPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const initialQ = (location.state as { q?: string } | null)?.q ?? '';
-  const [active, setActive] = useState('products');
+  const initialTab = (location.state as { tab?: string } | null)?.tab ?? 'products';
+  const [active, setActive] = useState(initialTab);
   const [q, setQ] = useState(initialQ);
   // A later TopBar search while already on /catalog updates state, not the initializer.
   useEffect(() => {
@@ -371,7 +372,7 @@ export function CatalogPage() {
                 </span>
                 <button
                   className="btn-p"
-                  onClick={() => setEditingEntity({ type: 'supplier', id: '', name: '', desc: '', isNew: true })}
+                  onClick={() => navigate('/catalog/suppliers/new')}
                 >
                   Add supplier
                 </button>
@@ -390,13 +391,7 @@ export function CatalogPage() {
                   .sort((a, b) => (supAsc ? 1 : -1) * a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
                   .map((s) => (
                     <div key={s.id} className="ctrow sup3">
-                      <span
-                        className="rlink"
-                        onClick={() => {
-                          setSelectedSupplier(s.name);
-                          setActive('products');
-                        }}
-                      >
+                      <span className="rlink" onClick={() => navigate(`/catalog/suppliers/${s.id}`)}>
                         {s.name}
                       </span>
                       <span className="ct-muted">{s.description || '—'}</span>
@@ -416,7 +411,7 @@ export function CatalogPage() {
                           title="Edit"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setEditingEntity({ type: 'supplier', id: s.id, name: s.name, desc: s.description });
+                            navigate(`/catalog/suppliers/${s.id}`);
                           }}
                         >
                           ✎

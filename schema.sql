@@ -128,6 +128,8 @@ create table if not exists catalog_meta (
   kind        text not null check (kind in ('categories','brands','suppliers')),
   name        text not null,
   description text,
+  -- Supplier profile (default markup, contact, addresses) — migration 0006.
+  details     jsonb not null default '{}',
   created_at  timestamptz not null default now(),
   -- One "Seasonal" category, one "Nova" brand, etc. Imports must not duplicate.
   constraint catalog_meta_kind_name_key unique (kind, name)
