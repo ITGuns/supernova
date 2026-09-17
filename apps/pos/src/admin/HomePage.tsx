@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { fmt } from '../lib/format';
-import { useCart, type CompletedSale } from '../store/cartStore';
+import { saleCost, saleRevenue, useCart, type CompletedSale } from '../store/cartStore';
+import { useProducts } from '../store/productStore';
 import { useSetup } from '../store/setupStore';
 import { useUsers } from '../store/userStore';
 import { ClipboardGraphic, InventoryGraphic, PartnerLogo, PaymentsGraphic } from './illustrations';
@@ -22,15 +23,15 @@ const startOfDay = (t: number): number => {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 };
 
-/** Revenue (in dollars) per chart hour for the day starting at dayStart. */
-const hourlyRevenue = (sales: CompletedSale[], dayStart: number): number[] => {
+/** Dollars per chart hour for the day starting at dayStart, using `amount` of each sale. */
+const hourly = (sales: CompletedSale[], dayStart: number, amount: (s: CompletedSale) => number): number[] => {
   const buckets = CHART_HOURS.map(() => 0);
   for (const s of sales) {
     if (s.status === 'Returned') continue;
     if (s.at < dayStart || s.at >= dayStart + DAY_MS) continue;
     const h = new Date(s.at).getHours();
     const idx = Math.min(Math.max(h - CHART_HOURS[0]!, 0), buckets.length - 1);
-    buckets[idx] = (buckets[idx] ?? 0) + s.totalMinor / 100;
+    buckets[idx] = (buckets[idx] ?? 0) + amount(s) / 100;
   }
   return buckets;
 };
@@ -86,6 +87,7 @@ type Period = (typeof PERIODS)[number];
 export function HomePage() {
   const navigate = useNavigate();
   const allSales = useCart((s) => s.sales);
+  const products = useProducts((s) => s.products);
   // Training-mode sales are practice runs: they never count as revenue.
   const sales = useMemo(() => allSales.filter((s) => !s.training), [allSales]);
   const salesTargetMinor = useSetup((s) => s.salesTargetMinor);
@@ -121,13 +123,21 @@ export function HomePage() {
   }, [period, now, todayStart]);
 
   // Returned sales carry no revenue; the caller still sees them via returnsCount.
+  // Revenue is what was charged (tax included, as on the receipt); gross
+  // profit is revenue excluding tax minus the supplier cost of the goods sold.
   const stats = (all: CompletedSale[]) => {
     const list = all.filter((x) => x.status !== 'Returned');
     const revenue = list.reduce((s, x) => s + x.totalMinor, 0);
+    const cost = list.reduce((s, x) => s + saleCost(x, products), 0);
+    const tax = list.reduce((s, x) => s + (x.taxMinor ?? 0), 0);
+    const profit = list.reduce((s, x) => s + saleRevenue(x), 0) - cost;
     const count = list.length;
     const items = list.reduce((s, x) => s + x.lines.reduce((a, l) => a + l.quantity, 0), 0);
     return {
       revenue,
+      cost,
+      tax,
+      profit,
       count,
       items,
       avgSale: count ? Math.round(revenue / count) : 0,
@@ -147,17 +157,18 @@ export function HomePage() {
   const prev = stats(prevSales);
 
   const returnsCount = periodSales.filter((s) => s.status === 'Returned').length;
-  const taxCollected = Math.round(cur.revenue * 0.0825);
+  const taxCollected = cur.tax;
 
   // ----- Real hourly buckets: today vs yesterday -----
-  const todayBuckets = useMemo(() => hourlyRevenue(sales, todayStart), [sales, todayStart]);
+  const todayBuckets = useMemo(() => hourly(sales, todayStart, (s) => s.totalMinor), [sales, todayStart]);
   const yesterdayBuckets = useMemo(
-    () => hourlyRevenue(sales, todayStart - DAY_MS),
+    () => hourly(sales, todayStart - DAY_MS, (s) => s.totalMinor),
     [sales, todayStart],
   );
   const salesTicks = niceTicks(Math.max(...todayBuckets, ...yesterdayBuckets));
-  const grossToday = todayBuckets.map((v) => v * 0.6);
-  const grossComp = yesterdayBuckets.map((v) => v * 0.6);
+  const profitOf = (s: CompletedSale) => saleRevenue(s) - saleCost(s, products);
+  const grossToday = useMemo(() => hourly(sales, todayStart, profitOf), [sales, todayStart, products]);
+  const grossComp = useMemo(() => hourly(sales, todayStart - DAY_MS, profitOf), [sales, todayStart, products]);
   const grossTicks = niceTicks(Math.max(...grossToday, ...grossComp));
 
   // ----- Sales target (today's revenue vs configured target) -----
@@ -191,7 +202,7 @@ export function HomePage() {
 
   const avgSaleChange = pctChange(cur.avgSale, prev.avgSale);
   const avgItemsChange = pctChange(cur.avgItems, prev.avgItems);
-  const grossChange = pctChange(cur.revenue, prev.revenue);
+  const grossChange = pctChange(cur.profit, prev.profit);
   const periodLabel =
     period === 'Today' ? 'Today’s sales' : `${period}’s sales`;
 
@@ -375,7 +386,7 @@ export function HomePage() {
           )}
           <div className="gross-card">
             <div className="home-card-h">GROSS PROFIT</div>
-            <div className="hs2-value">{fmt(Math.round(cur.revenue * 0.6))}</div>
+            <div className="hs2-value">{fmt(cur.profit)}</div>
             <div className="hs2-sub">
               {grossChange ? `${grossChange} vs ${compLabel}` : `no sales ${compLabel}`}
             </div>

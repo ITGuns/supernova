@@ -229,7 +229,10 @@ create table if not exists sales (
   -- Set on return: what was refunded, per original tender method.
   refund_tenders  jsonb not null default '[]',
   refunded_at     timestamptz,
-  created_at      timestamptz not null default now()
+  created_at      timestamptz not null default now(),
+  -- Tax and discount charged (migration 0008)
+  tax_minor       int not null default 0,
+  discount_minor  int not null default 0
 );
 
 -- ── Parked Sales ─────────────────────────────────────────────
@@ -251,7 +254,10 @@ create table if not exists quotes (
   total_minor int not null default 0,
   created_at  timestamptz not null default now(),
   expires_at  timestamptz not null,
-  status      text not null default 'Draft'
+  status      text not null default 'Draft',
+  -- Quote lines + discount so a quote loads back into the register (migration 0008)
+  lines        jsonb not null default '[]',
+  discount_bps int not null default 0
 );
 
 -- ── Inventory Transactions (POs, Transfers, Returns) ─────────
@@ -363,3 +369,42 @@ values
   ('u-owner', 'Alex Kim',    'alex@nova.local',           'Account owner, Admin', 'alex1234', true, true,  '#4b3df5', 'just now'),
   ('u-jade',  'Jade Savage', 'jade.savage@nova.local',    'Admin',                'jade1234', true, false, '#7c3aed', 'just now')
 on conflict (id) do nothing;
+
+-- Promotions, price books and fulfillments (migration 0008)
+create table if not exists promotions (
+  id          text primary key,
+  name        text not null,
+  description text not null default '',
+  kind        text not null default 'percent',   -- 'percent' | 'amount' | 'fixed'
+  value       int  not null default 0,           -- percent: basis points; amount/fixed: minor units
+  applies_to  text not null default 'all',       -- 'all' | 'categories' | 'products'
+  target_ids  jsonb not null default '[]',
+  start_at    timestamptz,
+  end_at      timestamptz,
+  active      boolean not null default true,
+  created_at  timestamptz not null default now()
+);
+
+create table if not exists price_books (
+  id             text primary key,
+  name           text not null,
+  customer_group text not null default 'All Customers',
+  outlet         text not null default '',
+  start_at       timestamptz,
+  end_at         timestamptz,
+  entries        jsonb not null default '[]',
+  created_at     timestamptz not null default now()
+);
+
+create table if not exists fulfillments (
+  id            text primary key,
+  number        text not null,
+  kind          text not null default 'pickup',
+  customer_name text not null default '',
+  lines         jsonb not null default '[]',
+  discount_bps  int  not null default 0,
+  note          text not null default '',
+  status        text not null default 'Open',
+  created_at    timestamptz not null default now(),
+  completed_at  timestamptz
+);

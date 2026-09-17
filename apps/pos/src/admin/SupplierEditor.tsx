@@ -9,6 +9,7 @@ import {
 } from '../store/catalogMetaStore';
 import { useProducts } from '../store/productStore';
 import { Field, Section } from './FormLayout';
+import { NumInput } from './NumInput';
 import '../styles/product-editor.css';
 
 const COUNTRIES = [
@@ -152,13 +153,9 @@ export function SupplierEditor() {
             </Field>
             <Field label="Default markup">
               <span className="pe-money pe-suffix">
-                <input
-                  className="pe-input"
-                  type="number"
-                  min={0}
-                  step="0.01"
+                <NumInput
                   value={markupPct === 0 ? '0' : String(markupPct)}
-                  onChange={(e) => setDetails({ defaultMarkupBps: Math.max(0, Math.round((parseFloat(e.target.value) || 0) * 100)) })}
+                  onCommit={(t) => setDetails({ defaultMarkupBps: Math.max(0, Math.round((parseFloat(t) || 0) * 100)) })}
                 />
                 <span>%</span>
               </span>

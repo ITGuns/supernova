@@ -21,6 +21,9 @@ import { useQuotes } from './store/quotesStore';
 import { useCatalogMeta } from './store/catalogMetaStore';
 import { useAdjustmentReasons } from './store/adjustmentReasonsStore';
 import { useProductTags } from './store/tagStore';
+import { usePromotions } from './store/promotionStore';
+import { usePriceBooks } from './store/priceBookStore';
+import { useFulfillments } from './store/fulfillmentStore';
 import { startSyncQueue } from './lib/syncQueue';
 
 async function bootstrapDb() {
@@ -39,6 +42,9 @@ async function bootstrapDb() {
       useCatalogMeta.getState().syncFromDb(),
       useAdjustmentReasons.getState().syncFromDb(),
       useProductTags.getState().syncFromDb(),
+      usePromotions.getState().syncFromDb(),
+      usePriceBooks.getState().syncFromDb(),
+      useFulfillments.getState().syncFromDb(),
     ]);
   } catch (err) {
     console.warn('[bootstrap] Supabase sync failed, using cached data.', err);

@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { fmt } from '../lib/format';
 import { ContextNav, type ContextItem } from '../shell/ContextNav';
+import { useCart } from '../store/cartStore';
 import { useCatalogMeta } from '../store/catalogMetaStore';
+import { FULFILLMENT_LABEL, useFulfillments, type FulfillmentKind, type FulfillmentStatus } from '../store/fulfillmentStore';
 import { countBucket, txQty, txTotal, useInventory, type StockTx, type StockTxKind, type StockTxStatus } from '../store/inventoryStore';
 import '../styles/catalog.css';
 import { BagPhone, CatBox, InventoryGraphic, ScannerGraphic } from './illustrations';
@@ -134,11 +136,25 @@ export function InventoryPage() {
   };
   const whenOf = (ms: number) => new Date(ms).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 
-  // Fulfillments
-  const [fulTab, setFulTab] = useState<'all' | 'pack' | 'pickup' | 'delivery'>('all');
+  // Fulfillments: sales marked as unfulfilled at the register
+  const fulfillments = useFulfillments((s) => s.fulfillments);
+  const updateFulfillment = useFulfillments((s) => s.updateFulfillment);
+  const loadLines = useCart((s) => s.loadLines);
+  const [fulTab, setFulTab] = useState<'all' | FulfillmentKind>('all');
   const [fulOutlet, setFulOutlet] = useState('all');
-  const [fulStatus, setFulStatus] = useState('all');
-  const [fulType, setFulType] = useState('all');
+  const [fulStatus, setFulStatus] = useState<'all' | FulfillmentStatus>('all');
+  const [fulType, setFulType] = useState<'all' | FulfillmentKind>('all');
+  const visibleFulfillments = fulfillments.filter(
+    (f) => (fulTab === 'all' || f.kind === fulTab) && (fulStatus === 'all' || f.status === fulStatus) && (fulType === 'all' || f.kind === fulType),
+  );
+  const outletName = outlets[0] ?? 'Main Outlet';
+  const retrieveFulfillment = (id: string) => {
+    const f = fulfillments.find((x) => x.id === id);
+    if (!f || f.status !== 'Open') return;
+    loadLines(f.lines, { customerName: f.customerName, discountBps: f.discountBps, note: f.note });
+    updateFulfillment(id, { status: 'Completed', completedAt: Date.now() });
+    navigate('/sell');
+  };
 
   return (
     <>
@@ -442,13 +458,13 @@ export function InventoryPage() {
                   All
                 </button>
                 <button className={`sh-tab ${fulTab === 'pack' ? 'active' : ''}`} onClick={() => setFulTab('pack')}>
-                  Pack orders
+                  Pack orders ({fulfillments.filter((f) => f.kind === 'pack' && f.status === 'Open').length})
                 </button>
                 <button className={`sh-tab ${fulTab === 'pickup' ? 'active' : ''}`} onClick={() => setFulTab('pickup')}>
-                  Customer pickup
+                  Customer pickup ({fulfillments.filter((f) => f.kind === 'pickup' && f.status === 'Open').length})
                 </button>
                 <button className={`sh-tab ${fulTab === 'delivery' ? 'active' : ''}`} onClick={() => setFulTab('delivery')}>
-                  Delivery
+                  Delivery ({fulfillments.filter((f) => f.kind === 'delivery' && f.status === 'Open').length})
                 </button>
               </div>
               <div className="subbar-row">
@@ -466,7 +482,7 @@ export function InventoryPage() {
                 </div>
                 <div className="f-field">
                   <label>Status</label>
-                  <select className="set-select" value={fulStatus} onChange={(e) => setFulStatus(e.target.value)} style={selStyle}>
+                  <select className="set-select" value={fulStatus} onChange={(e) => setFulStatus(e.target.value as 'all' | FulfillmentStatus)} style={selStyle}>
                     <option value="all">All</option>
                     <option value="Open">Open</option>
                     <option value="Completed">Completed</option>
@@ -475,11 +491,11 @@ export function InventoryPage() {
                 </div>
                 <div className="f-field">
                   <label>Type</label>
-                  <select className="set-select" value={fulType} onChange={(e) => setFulType(e.target.value)} style={selStyle}>
+                  <select className="set-select" value={fulType} onChange={(e) => setFulType(e.target.value as 'all' | FulfillmentKind)} style={selStyle}>
                     <option value="all">All</option>
-                    <option value="Pack orders">Pack orders</option>
-                    <option value="Customer pickup">Customer pickup</option>
-                    <option value="Delivery">Delivery</option>
+                    <option value="pack">Pack orders</option>
+                    <option value="pickup">Customer pickup</option>
+                    <option value="delivery">Delivery</option>
                   </select>
                 </div>
               </div>
@@ -490,10 +506,36 @@ export function InventoryPage() {
                 <span>Type</span>
                 <span>Customer</span>
               </div>
-              <div className="astate ful-astate">
-                <BagPhone />
-                <div>No fulfillments found. Try a different search or update your filters.</div>
-              </div>
+              {visibleFulfillments.length ? (
+                <div className="atable">
+                  {visibleFulfillments.map((f) => (
+                    <div key={f.id} className="ful-row">
+                      <span>
+                        <span className="rlink strong">{f.number}</span>
+                        <br />
+                        <span className="cnt-meta">{f.lines.reduce((n, l) => n + l.quantity, 0)} item{f.lines.reduce((n, l) => n + l.quantity, 0) === 1 ? '' : 's'} · {new Date(f.createdAt).toLocaleString()}{f.note ? ` · ${f.note}` : ''}</span>
+                      </span>
+                      <span>{outletName}</span>
+                      <span><span className={`tx-badge ${f.status === 'Open' ? 'open' : f.status === 'Completed' ? 'received' : 'cancelled'}`}>{f.status}</span></span>
+                      <span>{FULFILLMENT_LABEL[f.kind]}</span>
+                      <span className="ful-cust">
+                        <span>{f.customerName || '—'}</span>
+                        {f.status === 'Open' && (
+                          <span className="ful-actions">
+                            <button className="btn-s" onClick={() => retrieveFulfillment(f.id)}>Retrieve to register</button>
+                            <span className="rlink" onClick={() => updateFulfillment(f.id, { status: 'Cancelled', completedAt: Date.now() })}>Cancel</span>
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="astate ful-astate">
+                  <BagPhone />
+                  <div>No fulfillments found. Try a different search or update your filters.</div>
+                </div>
+              )}
             </>
           )}
         </div>

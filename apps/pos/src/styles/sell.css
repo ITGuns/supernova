@@ -149,3 +149,45 @@ select.sh-input {
   padding: 0 12px;
   font-size: 15px;
 }
+
+/* Payment modal: one button per configured payment type */
+.pm-types {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.pm-types .pm-primary {
+  margin: 0;
+}
+.pm-types-hint {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  padding: 6px 0;
+}
+
+/* Cart line: price book / promotion pricing */
+.dline-was {
+  color: var(--faint);
+  margin-right: 6px;
+}
+.dline-promo {
+  color: var(--ok);
+  font-weight: 600;
+}
+.reg-open-field select {
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 0 12px;
+  font-size: 15px;
+}
+.qt-hint {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+}

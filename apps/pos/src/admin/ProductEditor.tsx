@@ -15,9 +15,11 @@ import {
   type SkuCode,
   type SkuCodeType,
 } from '../store/productStore';
+import { useInventory } from '../store/inventoryStore';
 import { useSettings } from '../store/settingsStore';
 import { useSetup } from '../store/setupStore';
 import { Field, Section } from './FormLayout';
+import { IntInput, MoneyInput, NumInput } from './NumInput';
 import '../styles/product-editor.css';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -226,6 +228,7 @@ export function ProductEditor() {
   const brands = useCatalogMeta((s) => s.brands);
   const suppliers = useCatalogMeta((s) => s.suppliers);
   const addEntity = useCatalogMeta((s) => s.addEntity);
+  const transactions = useInventory((s) => s.transactions);
   const knownTags = useProductTags((s) => s.tags);
   const ensureTags = useProductTags((s) => s.ensureTags);
   const taxes = useSettings((s) => s.taxes);
@@ -279,6 +282,18 @@ export function ProductEditor() {
   const margin = retailEx > 0 ? (retailEx - cost) / retailEx : 0;
   const taxMinor = Math.round(retailEx * taxRate);
   const retailInc = retailEx + taxMinor;
+
+  const landedCost = useMemo<number | null>(() => {
+    if (!existing) return null;
+    const received = transactions
+      .filter((t) => t.kind === 'order' && t.status === 'Received' && (t.details.receivedAt ?? 0) > 0)
+      .sort((a, b) => (b.details.receivedAt ?? 0) - (a.details.receivedAt ?? 0));
+    for (const t of received) {
+      const line = t.lines.find((l) => l.productId === existing.id && (l.costMinor ?? 0) > 0);
+      if (line) return line.costMinor ?? null;
+    }
+    return null;
+  }, [existing, transactions]);
 
   const setMarkup = (s: string) => set({ priceMinor: Math.round(cost * (1 + (parseFloat(s) || 0) / 100)) });
   const setMargin = (s: string) => {
@@ -463,10 +478,10 @@ export function ProductEditor() {
         {tab === 'shipping' ? (
           <Section title="Shipping and delivery" hint="Used for shipping quotes and packing slips on online and delivery orders.">
             <div className="pe-grid4">
-              <Field label="Weight (g)"><input className="pe-input" type="number" min={0} value={draft.shipping.weightG || ''} onChange={(e) => set({ shipping: { ...draft.shipping, weightG: parseFloat(e.target.value) || 0 } })} placeholder="0" /></Field>
-              <Field label="Length (cm)"><input className="pe-input" type="number" min={0} value={draft.shipping.lengthCm || ''} onChange={(e) => set({ shipping: { ...draft.shipping, lengthCm: parseFloat(e.target.value) || 0 } })} placeholder="0" /></Field>
-              <Field label="Width (cm)"><input className="pe-input" type="number" min={0} value={draft.shipping.widthCm || ''} onChange={(e) => set({ shipping: { ...draft.shipping, widthCm: parseFloat(e.target.value) || 0 } })} placeholder="0" /></Field>
-              <Field label="Height (cm)"><input className="pe-input" type="number" min={0} value={draft.shipping.heightCm || ''} onChange={(e) => set({ shipping: { ...draft.shipping, heightCm: parseFloat(e.target.value) || 0 } })} placeholder="0" /></Field>
+              <Field label="Weight (g)"><NumInput value={draft.shipping.weightG ? String(draft.shipping.weightG) : ''} onCommit={(t) => set({ shipping: { ...draft.shipping, weightG: Math.max(0, parseFloat(t) || 0) } })} placeholder="0" /></Field>
+              <Field label="Length (cm)"><NumInput value={draft.shipping.lengthCm ? String(draft.shipping.lengthCm) : ''} onCommit={(t) => set({ shipping: { ...draft.shipping, lengthCm: Math.max(0, parseFloat(t) || 0) } })} placeholder="0" /></Field>
+              <Field label="Width (cm)"><NumInput value={draft.shipping.widthCm ? String(draft.shipping.widthCm) : ''} onCommit={(t) => set({ shipping: { ...draft.shipping, widthCm: Math.max(0, parseFloat(t) || 0) } })} placeholder="0" /></Field>
+              <Field label="Height (cm)"><NumInput value={draft.shipping.heightCm ? String(draft.shipping.heightCm) : ''} onCommit={(t) => set({ shipping: { ...draft.shipping, heightCm: Math.max(0, parseFloat(t) || 0) } })} placeholder="0" /></Field>
             </div>
             <Field label="Delivery notes" wide>
               <textarea className="pe-input pe-textarea" value={draft.shipping.notes} onChange={(e) => set({ shipping: { ...draft.shipping, notes: e.target.value } })} placeholder="Fragile, keep upright, requires signature…" />
@@ -646,8 +661,8 @@ export function ProductEditor() {
                             <tr key={key}>
                               <td>{draft.name || 'Product'} / {key}</td>
                               <td><input className="pe-input" value={row.sku} onChange={(e) => put({ sku: e.target.value })} /></td>
-                              <td><input className="pe-input" type="number" step="0.01" min={0} value={money(row.priceMinor)} onChange={(e) => put({ priceMinor: toMinor(e.target.value) })} /></td>
-                              <td><input className="pe-input" type="number" min={0} value={row.available} onChange={(e) => put({ available: Math.max(0, parseInt(e.target.value, 10) || 0) })} /></td>
+                              <td><MoneyInput minor={row.priceMinor} onChange={(v) => put({ priceMinor: v })} /></td>
+                              <td><IntInput int={row.available} onChange={(n) => put({ available: n ?? 0 })} /></td>
                             </tr>
                           );
                         })}
@@ -712,19 +727,7 @@ export function ProductEditor() {
                   <input className="pe-input" value={s.code} onChange={(e) => set({ suppliers: draft.suppliers.map((x, j) => (j === i ? { ...x, code: e.target.value } : x)) })} placeholder="Enter supplier code" />
                   <span className="pe-money">
                     <span>$</span>
-                    <input
-                      className="pe-input"
-                      type="number"
-                      step="0.01"
-                      min={0}
-                      value={money(s.priceMinor)}
-                      onChange={(e) => {
-                        const priceMinor = toMinor(e.target.value);
-                        const next = draft.suppliers.map((x, j) => (j === i ? { ...x, priceMinor } : x));
-                        // The first supplier's price is the cost used for markup and margin.
-                        set({ suppliers: next, ...(i === 0 ? { supplierPriceMinor: priceMinor, ...markupFrom(s.supplier, priceMinor, draft.priceMinor) } : {}) });
-                      }}
-                    />
+                    <MoneyInput minor={s.priceMinor} onChange={(v) => set({ suppliers: draft.suppliers.map((x, j) => (j === i ? { ...x, priceMinor: v } : x)), ...(i === 0 ? { supplierPriceMinor: v, ...markupFrom(s.supplier, v, draft.priceMinor) } : {}) })} />
                   </span>
                   {i > 0 ? <button type="button" className="pe-x" onClick={() => set({ suppliers: draft.suppliers.filter((_, j) => j !== i) })} aria-label="Remove supplier">×</button> : <span />}
                 </div>
@@ -748,13 +751,13 @@ export function ProductEditor() {
                 <tbody>
                   <tr>
                     <td>General Price Book (All Products)</td>
-                    <td><span className="pe-money"><span>$</span><input className="pe-input" type="number" step="0.01" min={0} value={money(cost)} onChange={(e) => { const v = toMinor(e.target.value); set({ supplierPriceMinor: v, suppliers: draft.suppliers.map((s, j) => (j === 0 ? { ...s, priceMinor: v } : s)), ...markupFrom(draft.suppliers[0]?.supplier ?? '', v, draft.priceMinor) }); }} /></span></td>
-                    <td className="pe-muted">–</td>
-                    <td><span className="pe-money"><input className="pe-input" type="number" step="0.01" value={pct(markup)} disabled={cost === 0} onChange={(e) => setMarkup(e.target.value)} /><span>%</span></span></td>
-                    <td><span className="pe-money"><input className="pe-input" type="number" step="0.01" value={pct(margin)} disabled={cost === 0} onChange={(e) => setMargin(e.target.value)} /><span>%</span></span></td>
+                    <td><span className="pe-money"><span>$</span><MoneyInput minor={cost} onChange={(v) => set({ supplierPriceMinor: v, suppliers: draft.suppliers.map((s, j) => (j === 0 ? { ...s, priceMinor: v } : s)), ...markupFrom(draft.suppliers[0]?.supplier ?? '', v, draft.priceMinor) })} /></span></td>
+                    <td className="pe-muted">{landedCost === null ? '–' : fmt(landedCost)}</td>
+                    <td><span className="pe-money"><NumInput value={pct(markup)} disabled={cost === 0} onCommit={setMarkup} /><span>%</span></span></td>
+                    <td><span className="pe-money"><NumInput value={pct(margin)} disabled={cost === 0} onCommit={setMargin} /><span>%</span></span></td>
                     <td className="pe-muted">{fmt(taxMinor)}</td>
-                    <td><span className="pe-money"><span>$</span><input className="pe-input" type="number" step="0.01" min={0} value={money(retailEx)} onChange={(e) => set({ priceMinor: toMinor(e.target.value) })} /></span></td>
-                    <td><span className="pe-money"><span>$</span><input className="pe-input" type="number" step="0.01" min={0} value={money(retailInc)} onChange={(e) => setRetailInc(e.target.value)} /></span></td>
+                    <td><span className="pe-money"><span>$</span><MoneyInput minor={retailEx} onChange={(v) => set({ priceMinor: v })} /></span></td>
+                    <td><span className="pe-money"><span>$</span><MoneyInput minor={retailInc} onChange={(v) => setRetailInc(String(v / 100))} /></span></td>
                   </tr>
                 </tbody>
               </table>
@@ -796,18 +799,18 @@ export function ProductEditor() {
                           {draft.productType === 'composite' ? (
                             <span className="pe-muted">{compositeAvailable ?? 0} (from components)</span>
                           ) : (
-                            <input className="pe-input" type="number" min={0} value={draft.available} onChange={(e) => set({ available: Math.max(0, parseInt(e.target.value, 10) || 0) })} />
+                            <IntInput int={draft.available} onChange={(n) => set({ available: n ?? 0 })} />
                           )}
                         </td>
                         {draft.replenishMethod === 'minmax' ? (
                           <>
-                            <td><input className="pe-input" type="number" min={0} value={draft.minQty} onChange={(e) => set({ minQty: e.target.value })} placeholder="—" /></td>
-                            <td><input className="pe-input" type="number" min={0} value={draft.maxQty} onChange={(e) => set({ maxQty: e.target.value })} placeholder="—" /></td>
+                            <td><NumInput value={draft.minQty} onCommit={(t) => set({ minQty: t.replace(/[^0-9]/g, '') })} placeholder="—" /></td>
+                            <td><NumInput value={draft.maxQty} onCommit={(t) => set({ maxQty: t.replace(/[^0-9]/g, '') })} placeholder="—" /></td>
                           </>
                         ) : (
                           <>
-                            <td><input className="pe-input" type="number" min={0} value={draft.reorderPoint} onChange={(e) => set({ reorderPoint: e.target.value })} placeholder="—" /></td>
-                            <td><input className="pe-input" type="number" min={0} value={draft.reorderQty} onChange={(e) => set({ reorderQty: e.target.value })} placeholder="—" /></td>
+                            <td><NumInput value={draft.reorderPoint} onCommit={(t) => set({ reorderPoint: t.replace(/[^0-9]/g, '') })} placeholder="—" /></td>
+                            <td><NumInput value={draft.reorderQty} onCommit={(t) => set({ reorderQty: t.replace(/[^0-9]/g, '') })} placeholder="—" /></td>
                           </>
                         )}
                         <td><input className="pe-input" value={draft.location} onChange={(e) => set({ location: e.target.value })} placeholder="Enter a location" /></td>

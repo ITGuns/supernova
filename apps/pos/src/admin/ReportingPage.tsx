@@ -5,7 +5,10 @@ import { useRegisterSession } from '../store/registerSessionStore';
 import { initials, useUsers } from '../store/userStore';
 import { fmt } from '../lib/format';
 import { ContextNav, type ContextItem } from '../shell/ContextNav';
-import { useCart } from '../store/cartStore';
+import { saleCost, saleRevenue, useCart } from '../store/cartStore';
+import { methodOf, tenderLabel } from '../lib/tenders';
+import { useSetup } from '../store/setupStore';
+import { useSettings } from '../store/settingsStore';
 import { useAdjustmentReasons } from '../store/adjustmentReasonsStore';
 import { KpiChart } from './KpiChart';
 import { Sparkline } from './Sparkline';
@@ -240,6 +243,8 @@ export function ReportingPage() {
   // Training-mode sales are practice runs: they never count in any report.
   const sales = useMemo(() => allSales.filter((s) => !s.training), [allSales]);
   const adjustmentReasons = useAdjustmentReasons((s) => s.reasons);
+  const paymentTypes = useSetup((s) => s.paymentTypes);
+  const taxes = useSettings((s) => s.taxes);
   const regStatus = useRegisterSession((s) => s.status);
   const regOpenedAt = useRegisterSession((s) => s.openedAt);
   const regOpeningFloat = useRegisterSession((s) => s.openingFloatMinor);
@@ -247,6 +252,7 @@ export function ReportingPage() {
   const regMovements = useRegisterSession((s) => s.movements);
   const regClosures = useRegisterSession((s) => s.closures);
   const customers = useCustomers((s) => s.customers);
+  const allProducts = useProducts((s) => s.products);
   const [active, setActive] = useState('dashboard');
 
   // Dashboard filters
@@ -290,6 +296,34 @@ export function ReportingPage() {
   const [adjMode, setAdjMode] = useState('Include');
   const [adjFilter, setAdjFilter] = useState('');
   const [adjRange, setAdjRange] = useState(() => rangeLabel(daysAgo(30), today()));
+
+  // Tax report
+  const [taxRange, setTaxRange] = useState(() => rangeLabel(new Date(today().getFullYear(), today().getMonth(), 1), today()));
+  const taxParsedRange = useMemo(() => parseRange(taxRange), [taxRange]);
+  const taxFiltered = useMemo(
+    () => sales.filter((s) => s.status !== 'Returned' && s.at >= taxParsedRange.start.getTime() && s.at <= taxParsedRange.end.getTime()),
+    [sales, taxParsedRange],
+  );
+  // One row per tax rate actually charged. The rate is recovered from each
+  // sale's tax and taxable amounts, then named from Setup → Sales taxes.
+  const taxRows = useMemo(() => {
+    const rows = new Map<number, { label: string; ratePct: string; taxable: number; tax: number; count: number }>();
+    for (const s of taxFiltered) {
+      const tax = s.taxMinor ?? 0;
+      const taxable = s.totalMinor - tax;
+      const rateBps = tax > 0 && taxable > 0 ? Math.round((tax / taxable) * 10000) : 0;
+      const configured = taxes.find((t) => Math.abs(t.rateBps - rateBps) <= 5);
+      const key = configured?.rateBps ?? rateBps;
+      const label = configured?.label ?? (rateBps === 0 ? 'No Tax (0%)' : `Sales Tax (${(rateBps / 100).toFixed(2)}%)`);
+      const row = rows.get(key) ?? { label, ratePct: (key / 100).toFixed(2).replace(/\.?0+$/, ''), taxable: 0, tax: 0, count: 0 };
+      row.taxable += taxable;
+      row.tax += tax;
+      row.count += 1;
+      rows.set(key, row);
+    }
+    return [...rows.values()].sort((a, b) => b.tax - a.tax);
+  }, [taxFiltered, taxes]);
+  const taxTotals = useMemo(() => taxRows.reduce((a, r) => ({ taxable: a.taxable + r.taxable, tax: a.tax + r.tax }), { taxable: 0, tax: 0 }), [taxRows]);
 
   // User reports
   const [userSearch, setUserSearch] = useState('');
@@ -339,7 +373,8 @@ export function ReportingPage() {
       const rev = inB.reduce((a, x) => a + x.totalMinor, 0);
       const items = inB.reduce((a, x) => a + x.lines.reduce((q, l) => q + l.quantity, 0), 0);
       const custs = new Set(inB.map((x) => x.customer).filter(Boolean)).size;
-      return { rev, count: inB.length, items, custs };
+      const profit = inB.reduce((a, x) => a + saleRevenue(x) - saleCost(x, allProducts), 0);
+      return { rev, count: inB.length, items, custs, profit };
     });
     const labels = starts.map((d) =>
       view === 'Month'
@@ -347,7 +382,7 @@ export function ReportingPage() {
         : `${MON[d.getMonth()]} ${d.getDate()}`,
     );
     return { buckets, labels };
-  }, [sales, view, dashDate]);
+  }, [sales, view, dashDate, allProducts]);
 
   // Date range metrics for Sales Report
   const salesParsedRange = useMemo(() => parseRange(salesRange), [salesRange]);
@@ -355,12 +390,14 @@ export function ReportingPage() {
     return sales.filter((s) => s.status !== 'Returned' && s.at >= salesParsedRange.start.getTime() && s.at <= salesParsedRange.end.getTime());
   }, [sales, salesParsedRange]);
 
+  // Revenue excludes tax; cost of goods is the supplier cost locked in on each
+  // sale line (older sales fall back to the product's current supplier price).
   const salesMetrics = useMemo(() => {
-    const revMinor = salesFiltered.reduce((sum, s) => sum + s.totalMinor, 0);
-    const cogsMinor = Math.round(revMinor * 0.4);
+    const revMinor = salesFiltered.reduce((sum, s) => sum + saleRevenue(s), 0);
+    const cogsMinor = salesFiltered.reduce((sum, s) => sum + saleCost(s, allProducts), 0);
     const profitMinor = revMinor - cogsMinor;
-    const margin = revMinor > 0 ? 60 : 0;
-    const taxMinor = Math.round(revMinor * 0.0825); // 8.25% tax rate basis points
+    const margin = revMinor > 0 ? Math.round((profitMinor / revMinor) * 1000) / 10 : 0;
+    const taxMinor = salesFiltered.reduce((sum, s) => sum + (s.taxMinor ?? 0), 0);
 
     return {
       revenue: revMinor,
@@ -369,7 +406,7 @@ export function ReportingPage() {
       margin,
       tax: taxMinor,
     };
-  }, [salesFiltered]);
+  }, [salesFiltered, allProducts]);
 
   const dayHeaderLabel = useMemo(() => {
     const startDay = salesParsedRange.start;
@@ -383,21 +420,22 @@ export function ReportingPage() {
     return sales.filter((s) => s.status !== 'Returned' && s.at >= payParsedRange.start.getTime() && s.at <= payParsedRange.end.getTime());
   }, [sales, payParsedRange]);
 
+  // One row per payment type (Setup → Payment types), plus anything older
+  // sales were paid with that's no longer configured. Cash is net of change.
   const payMetrics = useMemo(() => {
-    let cashTotal = 0;
-    let cardTotal = 0;
+    const amount = new Map<string, number>();
+    const count = new Map<string, number>();
     for (const s of payFiltered) {
       for (const t of s.tenders) {
-        if (t.method === 'CASH') cashTotal += t.amountMinor;
-        else if (t.method === 'CARD') cardTotal += t.amountMinor;
+        amount.set(t.method, (amount.get(t.method) ?? 0) + t.amountMinor);
+        count.set(t.method, (count.get(t.method) ?? 0) + 1);
       }
+      if (s.changeMinor) amount.set('CASH', (amount.get('CASH') ?? 0) - s.changeMinor);
     }
-    return {
-      cash: cashTotal,
-      card: cardTotal,
-      total: cashTotal + cardTotal,
-    };
-  }, [payFiltered]);
+    const methods = [...paymentTypes.map(methodOf), ...[...amount.keys()].filter((m) => !paymentTypes.some((t) => methodOf(t) === m))];
+    const rows = methods.map((m) => ({ method: m, label: tenderLabel(m, paymentTypes), amount: amount.get(m) ?? 0, count: count.get(m) ?? 0 }));
+    return { rows, total: rows.reduce((a, r) => a + r.amount, 0), totalCount: rows.reduce((a, r) => a + r.count, 0) };
+  }, [payFiltered, paymentTypes]);
 
   // Inventory report covers the current calendar month to date.
   const invRange = useMemo(() => {
@@ -429,8 +467,8 @@ export function ReportingPage() {
 
     const list = invProducts.map((p) => {
       const stats = prodMap.get(p.name) ?? { qty: 0, rev: 0 };
-      const closing = 15 - stats.qty; // Assume initial stock of 15
-      const cost = Math.round(p.priceMinor * 0.4 * closing);
+      const closing = p.available;
+      const cost = (p.supplierPriceMinor ?? 0) * closing;
       totalInv += closing;
       totalRev += stats.rev;
       totalCost += cost;
@@ -456,13 +494,13 @@ export function ReportingPage() {
 
   const money = (minor: number) => (minor === 0 ? '$0' : fmt(minor));
   const bs = dash.buckets;
-  const curB = bs[bs.length - 1] ?? { rev: 0, count: 0, items: 0, custs: 0 };
+  const curB = bs[bs.length - 1] ?? { rev: 0, count: 0, items: 0, custs: 0, profit: 0 };
   const trim = (v: number) => String(Math.round(v * 100) / 100);
   const kpis = [
     { label: 'Revenue', value: money(curB.rev), series: bs.map((b) => b.rev / 100), fmtY: kMoney },
     { label: 'Sale count', value: String(curB.count), series: bs.map((b) => b.count), fmtY: String },
     { label: 'Customer count', value: curB.custs > 0 ? String(curB.custs) : '-', series: bs.map((b) => b.custs), fmtY: trim },
-    { label: 'Gross profit', value: money(Math.round(curB.rev * 0.6)), series: bs.map((b) => Math.round(b.rev * 0.6) / 100), fmtY: kMoney },
+    { label: 'Gross profit', value: money(curB.profit), series: bs.map((b) => b.profit / 100), fmtY: kMoney },
     { label: 'Avg. sale value', value: money(curB.count ? Math.round(curB.rev / curB.count) : 0), series: bs.map((b) => (b.count ? b.rev / b.count / 100 : 0)), fmtY: trim },
     { label: 'Avg. items per sale', value: curB.count ? trim(curB.items / curB.count) : '0', series: bs.map((b) => (b.count ? b.items / b.count : 0)), fmtY: trim },
   ].map((k) => ({ ...k, yTicks: niceTicks(Math.max(...k.series)) }));
@@ -971,27 +1009,24 @@ export function ReportingPage() {
               </div>
               <div className="rep-toolbar">
                 <span className="rlink">⇄ Format results</span>
-                <span className="rlink" onClick={() => downloadCSV('payment-report.csv', [['Payment type', MON[payParsedRange.start.getMonth()] ?? '', 'Amount'], ['Cash', fmt(payMetrics.cash), fmt(payMetrics.cash)], ['Credit Card', fmt(payMetrics.card), fmt(payMetrics.card)], ['Totals', fmt(payMetrics.total), fmt(payMetrics.total)]])}>⤓ Export report…</span>
+                <span className="rlink" onClick={() => downloadCSV('payment-report.csv', [['Payment type', MON[payParsedRange.start.getMonth()] ?? '', payMeasure], ...payMetrics.rows.map((r) => [r.label, payMeasure === 'Count' ? String(r.count) : fmt(r.amount), payMeasure === 'Count' ? String(r.count) : fmt(r.amount)]), ['Totals', payMeasure === 'Count' ? String(payMetrics.totalCount) : fmt(payMetrics.total), payMeasure === 'Count' ? String(payMetrics.totalCount) : fmt(payMetrics.total)]])}>⤓ Export report…</span>
               </div>
               <div className="pm-table">
                 <div className="pm-grouphead"><span /><span className="rpt-year">{payParsedRange.start.getFullYear()}</span><span className="rpt-total">TOTAL</span></div>
-                <div className="pm-head"><span>Payment type</span><span className="r">{MON[payParsedRange.start.getMonth()]}</span><span className="r">Amount</span></div>
+                <div className="pm-head"><span>Payment type</span><span className="r">{MON[payParsedRange.start.getMonth()]}</span><span className="r">{payMeasure}</span></div>
                 {payFiltered.length > 0 ? (
                   <>
-                    <div className="pm-row">
-                      <span>Cash</span>
-                      <span className="r">{fmt(payMetrics.cash)}</span>
-                      <span className="r">{fmt(payMetrics.cash)}</span>
-                    </div>
-                    <div className="pm-row">
-                      <span>Credit Card</span>
-                      <span className="r">{fmt(payMetrics.card)}</span>
-                      <span className="r">{fmt(payMetrics.card)}</span>
-                    </div>
+                    {payMetrics.rows.map((r) => (
+                      <div key={r.method} className="pm-row">
+                        <span>{r.label}</span>
+                        <span className="r">{payMeasure === 'Count' ? r.count : fmt(r.amount)}</span>
+                        <span className="r">{payMeasure === 'Count' ? r.count : fmt(r.amount)}</span>
+                      </div>
+                    ))}
                     <div className="pm-row totals">
                       <span>Totals</span>
-                      <span className="r">{fmt(payMetrics.total)}</span>
-                      <span className="r">{fmt(payMetrics.total)}</span>
+                      <span className="r">{payMeasure === 'Count' ? payMetrics.totalCount : fmt(payMetrics.total)}</span>
+                      <span className="r">{payMeasure === 'Count' ? payMetrics.totalCount : fmt(payMetrics.total)}</span>
                     </div>
                   </>
                 ) : (
@@ -1125,6 +1160,68 @@ export function ReportingPage() {
                 </>
               );
             })()
+          ) : active === 'tax' ? (
+            <>
+              <h1 className="page-title">Tax report</h1>
+              <div className="rep-band"><span>Sales tax collected, by tax rate, for the period.</span></div>
+              <div className="rep-filter">
+                <div className="rep-fg">
+                  <label>Date range</label>
+                  <DateRangeField value={taxRange} onApply={setTaxRange} />
+                </div>
+                <div className="rep-fg">
+                  <label>Outlet</label>
+                  <select value={outlet} onChange={(e) => setOutlet(e.target.value)}>
+                    <option>Main Outlet</option>
+                    <option>All outlets</option>
+                  </select>
+                </div>
+              </div>
+              <div className="rep-toolbar">
+                <span>Showing {taxFiltered.length} sale{taxFiltered.length === 1 ? '' : 's'}</span>
+                <span
+                  className="rlink"
+                  onClick={() =>
+                    downloadCSV('tax-report.csv', [
+                      ['Tax', 'Rate', 'Taxable sales', 'Tax collected', 'Total incl. tax'],
+                      ...taxRows.map((r) => [r.label, `${r.ratePct}%`, fmt(r.taxable), fmt(r.tax), fmt(r.taxable + r.tax)]),
+                      ['Totals', '', fmt(taxTotals.taxable), fmt(taxTotals.tax), fmt(taxTotals.taxable + taxTotals.tax)],
+                    ])
+                  }
+                >
+                  ⤓ Export report…
+                </span>
+              </div>
+              <div className="gc-stats">
+                <div className="gc-stat"><span>Taxable sales</span><b>{fmt(taxTotals.taxable)}</b></div>
+                <div className="gc-stat"><span>Tax collected</span><b>{fmt(taxTotals.tax)}</b></div>
+                <div className="gc-stat"><span>Total incl. tax</span><b>{fmt(taxTotals.taxable + taxTotals.tax)}</b></div>
+                <div className="gc-stat"><span>Effective rate</span><b>{taxTotals.taxable > 0 ? `${(Math.round((taxTotals.tax / taxTotals.taxable) * 10000) / 100).toFixed(2)}%` : '0%'}</b></div>
+              </div>
+              <div className="cm-table">
+                <div className="cm-head"><span>Tax</span><span>Rate</span><span>Taxable sales</span><span>Tax collected</span></div>
+                {taxRows.length === 0 ? (
+                  <div className="cm-empty">No data available for this period</div>
+                ) : (
+                  <>
+                    {taxRows.map((r) => (
+                      <div key={r.label} className="cm-row">
+                        <span>{r.label}<span className="cm-note">{r.count} sale{r.count === 1 ? '' : 's'}</span></span>
+                        <span>{r.ratePct}%</span>
+                        <span>{fmt(r.taxable)}</span>
+                        <span>{fmt(r.tax)}</span>
+                      </div>
+                    ))}
+                    <div className="cm-row totals">
+                      <span>Totals</span>
+                      <span />
+                      <span>{fmt(taxTotals.taxable)}</span>
+                      <span>{fmt(taxTotals.tax)}</span>
+                    </div>
+                  </>
+                )}
+              </div>
+            </>
           ) : active !== 'dashboard' ? (
             <>
               <h1 className="page-title">{activeLabel}</h1>

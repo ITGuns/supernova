@@ -182,3 +182,17 @@
   line-height: 1.45;
   text-align: left;
 }
+
+/* Users → Roles / Activity */
+.athead.roles,
+.arow.roles {
+  grid-template-columns: 1.2fr 3fr 0.6fr;
+}
+.athead.perms,
+.arow.perms {
+  grid-template-columns: 2.4fr repeat(4, 1fr);
+}
+.athead.act,
+.arow.act {
+  grid-template-columns: 1.4fr 1fr 2.4fr 0.8fr;
+}

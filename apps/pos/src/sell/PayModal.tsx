@@ -1,16 +1,27 @@
 import { useState } from 'react';
 import { fmt } from '../lib/format';
+import { CASH, isCash, methodOf, tenderShort } from '../lib/tenders';
 import { computeTotals } from '../lib/totals';
 import { useCart, type Tender, type TenderMethod } from '../store/cartStore';
+import { useProducts } from '../store/productStore';
 import { useSettings } from '../store/settingsStore';
+import { useSetup } from '../store/setupStore';
 
 const uid = (): string => crypto.randomUUID();
 
+/**
+ * Take payment. One button per payment type configured in Setup → Payment
+ * types (cash keeps its keypad, quick amounts and change calculation); a
+ * sale can be split across several. An amount typed on the keypad goes to
+ * whichever type is pressed next; otherwise a type takes the full balance.
+ */
 export function PayModal({ onClose }: { onClose: () => void }) {
   const lines = useCart((s) => s.lines);
   const discountBps = useCart((s) => s.orderDiscountBps);
   const completeSale = useCart((s) => s.completeSale);
   const taxBps = useSettings((s) => s.defaultTaxRateBps);
+  const paymentTypes = useSetup((s) => s.paymentTypes);
+  const products = useProducts((s) => s.products);
 
   const totals = computeTotals(lines, discountBps, 'USD', taxBps);
   const totalMinor = totals.totalMinor;
@@ -32,9 +43,15 @@ export function PayModal({ onClose }: { onClose: () => void }) {
   const pressDigit = (d: number) => setEntryMinor((v) => Math.min(v * 10 + d, 99_999_99));
   const backspace = () => setEntryMinor((v) => Math.floor(v / 10));
 
+  // Non-cash types can't take more than what's owed (no change on card / Venmo).
+  const otherTypes = paymentTypes.filter((t) => !isCash(methodOf(t)));
+  const amountFor = () => (entryMinor > 0 ? Math.min(entryMinor, remaining) : remaining);
+
   const complete = () => {
     completeSale({
       totalMinor,
+      taxMinor: totals.taxMinor,
+      discountMinor: totals.discountMinor,
       tenders,
       changeMinor: change,
       lines: lines.map((l) => ({
@@ -42,6 +59,9 @@ export function PayModal({ onClose }: { onClose: () => void }) {
         quantity: l.quantity,
         unitPriceMinor: l.unitPriceMinor,
         variantId: l.variantId,
+        // Lock in today's supplier cost so gross profit stays right even
+        // if the cost changes later.
+        costMinor: products.find((p) => p.id === l.variantId)?.supplierPriceMinor ?? 0,
       })),
     });
     onClose();
@@ -101,23 +121,33 @@ export function PayModal({ onClose }: { onClose: () => void }) {
               </div>
             </div>
 
-            <button
-              className="pm-primary"
-              disabled={remaining === 0}
-              onClick={() => addTender('CARD', remaining)}
-            >
-              💳 Card <span className="pm-primary-amt">{fmt(remaining)}</span>
-            </button>
+            <div className="pm-types">
+              {otherTypes.map((t) => (
+                <button
+                  key={t.id}
+                  className="pm-primary"
+                  disabled={remaining === 0}
+                  onClick={() => addTender(methodOf(t), amountFor())}
+                  title={entryMinor > 0 ? `Take ${fmt(amountFor())} by ${t.name}` : `Take the full ${fmt(remaining)} by ${t.name}`}
+                >
+                  {methodOf(t) === 'CARD' ? '💳 ' : ''}
+                  {t.name} <span className="pm-primary-amt">{fmt(amountFor())}</span>
+                </button>
+              ))}
+              {otherTypes.length === 0 && (
+                <div className="pm-types-hint">Add card, Venmo or other payment types in Setup → Payment types.</div>
+              )}
+            </div>
 
             <div className="pm-cash">
               <div className="pm-cash-head">Cash</div>
               <div className="pm-entry">{fmt(entryMinor)}</div>
               <div className="pm-quick">
-                <button disabled={remaining === 0} onClick={() => addTender('CASH', remaining)}>
+                <button disabled={remaining === 0} onClick={() => addTender(CASH, remaining)}>
                   Exact
                 </button>
-                <button onClick={() => addTender('CASH', 2000)}>$20</button>
-                <button onClick={() => addTender('CASH', 5000)}>$50</button>
+                <button onClick={() => addTender(CASH, 2000)}>$20</button>
+                <button onClick={() => addTender(CASH, 5000)}>$50</button>
               </div>
               <div className="pm-keypad">
                 {keys.map((k) => (
@@ -129,7 +159,7 @@ export function PayModal({ onClose }: { onClose: () => void }) {
                 <button onClick={() => pressDigit(0)}>0</button>
                 <button onClick={backspace}>⌫</button>
               </div>
-              <button className="pm-addcash" disabled={entryMinor === 0} onClick={() => addTender('CASH', entryMinor)}>
+              <button className="pm-addcash" disabled={entryMinor === 0} onClick={() => addTender(CASH, entryMinor)}>
                 Add cash
               </button>
             </div>
@@ -138,7 +168,7 @@ export function PayModal({ onClose }: { onClose: () => void }) {
               <div className="pm-tenders">
                 {tenders.map((t) => (
                   <div key={t.id} className="pm-tender">
-                    <span>{t.method === 'CASH' ? '💵 Cash' : '💳 Card'}</span>
+                    <span>{isCash(t.method) ? '💵 ' : t.method === 'CARD' ? '💳 ' : ''}{tenderShort(t.method, paymentTypes)}</span>
                     <span className="pm-tender-amt">{fmt(t.amountMinor)}</span>
                     <button onClick={() => removeTender(t.id)} aria-label="Remove">
                       ×

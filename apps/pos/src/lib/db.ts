@@ -204,6 +204,8 @@ export const dbSales = {
   insert: (row: Row) => insert('sales', row),
   update: (orderNumber: string, patch: Row) =>
     write({ table: 'sales', kind: 'update', payload: patch, match: { col: 'order_number', val: orderNumber }, scope: 'sales.update' }),
+  /** Whether the table has the tax / discount columns (migration 0008). */
+  hasTaxColumns: () => hasColumn('sales', 'tax_minor'),
 };
 
 // ─── Parked Sales ─────────────────────────────────────────────────────────────
@@ -240,6 +242,8 @@ export const dbQuotes = {
   },
   upsert: (row: Row) => upsert('quotes', row),
   del: (id: string) => delBy('quotes', 'id', id),
+  /** Whether the table keeps quote lines (migration 0008). */
+  hasLines: () => hasColumn('quotes', 'lines'),
 };
 
 // ─── Stock Transactions ───────────────────────────────────────────────────────
@@ -342,6 +346,35 @@ export const dbAdjustmentReasons = {
   del: (id: string) => delBy('adjustment_reasons', 'id', id),
   /** Whether the table has the `enabled` column (migration 0007). */
   hasEnabled: () => hasColumn('adjustment_reasons', 'enabled'),
+};
+
+// ─── Promotions / price books / fulfillments (migration 0008) ────────────────
+// Each `list()` returns 'missing' when its table doesn't exist yet so the
+// store can fall back to local data without raising a toast on every boot.
+const listOrMissing = async (table: string, order: string): Promise<Row[] | 'missing' | null> => {
+  if (!ok()) return null;
+  const { data, error } = await supabase.from(table).select('*').order(order, { ascending: false });
+  if (error) {
+    if (error.message.includes(table)) return 'missing';
+    reportDbError(`${table}.list`, error.message);
+    return null;
+  }
+  return data ?? [];
+};
+export const dbPromotions = {
+  list: () => listOrMissing('promotions', 'created_at'),
+  upsert: (row: Row) => upsert('promotions', row),
+  del: (id: string) => delBy('promotions', 'id', id),
+};
+export const dbPriceBooks = {
+  list: () => listOrMissing('price_books', 'created_at'),
+  upsert: (row: Row) => upsert('price_books', row),
+  del: (id: string) => delBy('price_books', 'id', id),
+};
+export const dbFulfillments = {
+  list: () => listOrMissing('fulfillments', 'created_at'),
+  upsert: (row: Row) => upsert('fulfillments', row),
+  del: (id: string) => delBy('fulfillments', 'id', id),
 };
 
 // ─── Product tags ────────────────────────────────────────────────────────────

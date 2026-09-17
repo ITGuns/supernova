@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { fmt } from '../lib/format';
 import { computeTotals } from '../lib/totals';
 import { useCart } from '../store/cartStore';
@@ -14,7 +15,9 @@ export function Quotes() {
   const addQuote = useQuotes((s) => s.addQuote);
   const updateQuote = useQuotes((s) => s.updateQuote);
   const deleteQuote = useQuotes((s) => s.deleteQuote);
+  const nav = useNavigate();
   const lines = useCart((s) => s.lines);
+  const loadLines = useCart((s) => s.loadLines);
   const orderDiscountBps = useCart((s) => s.orderDiscountBps);
   const customerName = useCart((s) => s.customerName);
   const taxBps = useSettings((s) => s.defaultTaxRateBps);
@@ -25,7 +28,7 @@ export function Quotes() {
   );
   const newQuote = () => {
     const totalMinor = lines.length > 0 ? computeTotals(lines, orderDiscountBps, 'USD', taxBps).totalMinor : 0;
-    addQuote({ customer: customerName || 'Walk-in customer', totalMinor });
+    addQuote({ customer: customerName || 'Walk-in customer', totalMinor, lines, discountBps: orderDiscountBps });
   };
   const date = (t: number) => new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 
@@ -57,6 +60,7 @@ export function Quotes() {
             <span className="r">Total</span>
             <span>Status</span>
           </div>
+          <div className="qt-hint">Load a quote to put its items back on the register and take payment.</div>
           {rows.map((x) => (
             <div key={x.id} className="qt-row">
               <span className="rlink">{x.num}</span>
@@ -65,6 +69,18 @@ export function Quotes() {
               <span>{date(x.expiresAt)}</span>
               <span className="r">{fmt(x.totalMinor)}</span>
               <span className="qt-actions">
+                {x.lines.length > 0 && (
+                  <button
+                    className="btn-s"
+                    onClick={() => {
+                      loadLines(x.lines, { customerName: x.customer === 'Walk-in customer' ? '' : x.customer, discountBps: x.discountBps });
+                      if (x.status === 'Draft' || x.status === 'Sent') updateQuote(x.id, { status: 'Accepted' });
+                      nav('/sell');
+                    }}
+                  >
+                    Load
+                  </button>
+                )}
                 <select value={x.status} onChange={(e) => updateQuote(x.id, { status: e.target.value as QuoteStatus })}>
                   {STATUSES.map((st) => <option key={st}>{st}</option>)}
                   {x.status === 'Expired' && <option>Expired</option>}

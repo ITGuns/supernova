@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { fmt } from '../lib/format';
+import { isCash, methodOf, tenderLabel as tenderName } from '../lib/tenders';
 import { refundFor, useCart, type Tender } from '../store/cartStore';
 import { useSetup } from '../store/setupStore';
 import { useUsers } from '../store/userStore';
@@ -27,7 +28,6 @@ interface HSale {
   refundedAt?: number;
 }
 
-const tenderLabel = (m: Tender['method']) => (m === 'CASH' ? 'Cash' : 'Card');
 
 const initials = (n: string) => n.split(' ').map((s) => s.charAt(0)).join('').slice(0, 2).toUpperCase();
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -41,6 +41,8 @@ export function SalesHistory() {
   const parked = useCart((s) => s.parked);
   const retrieve = useCart((s) => s.retrieve);
   const markReturned = useCart((s) => s.markReturned);
+  const paymentTypes = useSetup((s) => s.paymentTypes);
+  const tenderLabel = (m: string) => tenderName(m, paymentTypes);
   const users = useUsers((s) => s.users);
   const outlet = useSetup((s) => s.outlets)[0];
   const outletName = outlet?.name ?? 'Main Outlet';
@@ -96,7 +98,7 @@ export function SalesHistory() {
     }
     if (statusFilter === 'Training' && !s.training) return false;
     if ((statusFilter === 'Completed' || statusFilter === 'Returned') && s.status !== statusFilter) return false;
-    if (paymentFilter !== 'All' && !s.methods.includes(paymentFilter === 'Cash' ? 'CASH' : 'CARD')) return false;
+    if (paymentFilter !== 'All' && !s.methods.includes(paymentFilter)) return false;
     if (userFilter !== 'All' && s.soldBy !== userFilter) return false;
     return true;
   });
@@ -185,7 +187,7 @@ export function SalesHistory() {
                 <div className="shf"><label>Register</label><select className="sh-input"><option>{outlet?.registers[0] ?? 'Main Register'}</option></select></div>
                 <div className="shf"><label>Status</label><select className="sh-input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="All">All sales</option><option>Completed</option><option>Returned</option><option>Training</option></select></div>
                 <div className="shf"><label>User</label><select className="sh-input" value={userFilter} onChange={(e) => setUserFilter(e.target.value)}><option value="All">All users</option>{users.map((u) => <option key={u.id}>{u.name}</option>)}</select></div>
-                <div className="shf"><label>Payment type</label><select className="sh-input" value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}><option value="All">All payment types</option><option>Cash</option><option>Card</option></select></div>
+                <div className="shf"><label>Payment type</label><select className="sh-input" value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}><option value="All">All payment types</option>{paymentTypes.map((t) => <option key={t.id} value={methodOf(t)}>{t.name}</option>)}</select></div>
               </>
             )}
             <div className="shf-actions">
@@ -292,7 +294,7 @@ export function SalesHistory() {
                 </div>
                 <p className="sh-confirm-hint">
                   This marks the sale as returned, puts the items back into stock, refunds {fmt(confirmReturn.totalMinor)} to the original payment method{confirmReturn.refund.length > 1 ? 's' : ''} and removes it from reported revenue.
-                  {confirmReturn.refund.some((t) => t.method === 'CASH') && ' Hand the cash refund to the customer from the till.'} It can’t be undone.
+                  {confirmReturn.refund.some((t) => isCash(t.method)) && ' Hand the cash refund to the customer from the till.'} It can’t be undone.
                 </p>
               </div>
             </div>

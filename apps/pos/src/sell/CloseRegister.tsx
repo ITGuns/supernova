@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { fmt } from '../lib/format';
+import { isCash, methodOf } from '../lib/tenders';
 import { useCart } from '../store/cartStore';
 import { useRegisterSession } from '../store/registerSessionStore';
 import { useSetup } from '../store/setupStore';
@@ -37,10 +38,12 @@ export function CloseRegister() {
 
   const movementNet = movements.reduce((sum, m) => sum + (m.type === 'ADD' ? m.amountMinor : -m.amountMinor), 0);
 
-  const { cashReceived, cashRefunded, cardExpected } = useMemo(() => {
+  const { cashReceived, cashRefunded, expectedByMethod } = useMemo(() => {
     let cash = 0;
     let refunded = 0;
-    let card = 0;
+    // Expected takings per non-cash payment type (card, Venmo, …), net of refunds.
+    const byMethod = new Map<string, number>();
+    const add = (m: string, v: number) => byMethod.set(m, (byMethod.get(m) ?? 0) + v);
     const inSession = (t: number) => openedAt == null || t >= openedAt;
     for (const s of sales) {
       if (s.training) continue;
@@ -48,18 +51,18 @@ export function CloseRegister() {
       // the original sale belongs to an earlier session.
       if (s.refundedAt != null && inSession(s.refundedAt)) {
         for (const t of s.refundTenders ?? []) {
-          if (t.method === 'CASH') refunded += t.amountMinor;
-          else card -= t.amountMinor;
+          if (isCash(t.method)) refunded += t.amountMinor;
+          else add(t.method, -t.amountMinor);
         }
       }
       if (!inSession(s.at)) continue;
       cash -= s.changeMinor;
       for (const t of s.tenders) {
-        if (t.method === 'CASH') cash += t.amountMinor;
-        else card += t.amountMinor;
+        if (isCash(t.method)) cash += t.amountMinor;
+        else add(t.method, t.amountMinor);
       }
     }
-    return { cashReceived: cash, cashRefunded: refunded, cardExpected: card };
+    return { cashReceived: cash, cashRefunded: refunded, expectedByMethod: byMethod };
   }, [sales, openedAt]);
   const cashExpected = openingFloatMinor + movementNet + cashReceived - cashRefunded;
 
@@ -68,10 +71,9 @@ export function CloseRegister() {
   // tender (with its expected total from this session's sales), any payment
   // types configured in Setup, and loyalty / store credit when enabled.
   const rows = [
-    { key: 'card', label: 'Card', expected: cardExpected, editable: true },
     ...paymentTypes
-      .filter((t) => t.id !== 'pt-cash' && t.id !== 'pt-card')
-      .map((t) => ({ key: t.id, label: t.name, expected: 0, editable: true })),
+      .filter((t) => !isCash(methodOf(t)))
+      .map((t) => ({ key: methodOf(t), label: t.name, expected: expectedByMethod.get(methodOf(t)) ?? 0, editable: true })),
     ...(loyaltyEnabled ? [{ key: 'loyalty', label: 'Loyalty', expected: 0, editable: false }] : []),
     ...(storeCreditEnabled ? [{ key: 'storeCredit', label: 'Store credit', expected: 0, editable: false }] : []),
   ].map((r) => ({ ...r, counted: num(counted[r.key]) }));

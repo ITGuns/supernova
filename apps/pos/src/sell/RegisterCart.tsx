@@ -54,7 +54,11 @@ export function RegisterCart({ onPay }: { onPay: () => void }) {
           <div key={l.lineId} className="dline">
             <div className="dline-main">
               <div className="dline-name">{l.name}</div>
-              <div className="dline-unit">{fmt(l.unitPriceMinor)} ea</div>
+              <div className="dline-unit">
+                {l.priceNote && l.basePriceMinor !== undefined && l.basePriceMinor !== l.unitPriceMinor && <s className="dline-was">{fmt(l.basePriceMinor)}</s>}
+                {fmt(l.unitPriceMinor)} ea
+                {l.priceNote && <span className="dline-promo"> · {l.priceNote}</span>}
+              </div>
             </div>
             <div className="dstepper">
               <button onClick={() => dec(l.lineId)} aria-label="Decrease">

@@ -1,6 +1,8 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { CatalogPage } from './admin/CatalogPage';
 import { CategoryEditor } from './admin/CategoryEditor';
+import { PriceBookEditor } from './admin/PriceBookEditor';
+import { PromotionEditor } from './admin/PromotionEditor';
 import { CustomersPage } from './admin/CustomersPage';
 import { FinancePage } from './admin/FinancePage';
 import { HomePage } from './admin/HomePage';
@@ -60,6 +62,10 @@ export function App() {
         <Route path="/catalog/suppliers/:id" element={<SupplierEditor />} />
         <Route path="/catalog/categories/new" element={<CategoryEditor />} />
         <Route path="/catalog/categories/:id" element={<CategoryEditor />} />
+        <Route path="/catalog/promotions/new" element={<PromotionEditor />} />
+        <Route path="/catalog/promotions/:id" element={<PromotionEditor />} />
+        <Route path="/catalog/price-books/new" element={<PriceBookEditor />} />
+        <Route path="/catalog/price-books/:id" element={<PriceBookEditor />} />
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/inventory/receive" element={<StockTxEditor />} />
         <Route path="/inventory/orders/new" element={<StockTxEditor />} />

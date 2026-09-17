@@ -1,4 +1,6 @@
 import { fmt } from '../lib/format';
+import { tenderShort } from '../lib/tenders';
+import { useSetup } from '../store/setupStore';
 import { useCart } from '../store/cartStore';
 import { useSettings } from '../store/settingsStore';
 
@@ -9,6 +11,7 @@ export function Receipt() {
   const sale = useCart((s) => s.lastSale);
   const dismiss = useCart((s) => s.dismissLastSale);
   const storeName = useSettings((s) => s.storeName);
+  const paymentTypes = useSetup((s) => s.paymentTypes);
   if (!sale) return null;
 
   const subtotal = sale.lines.reduce((a, l) => a + l.unitPriceMinor * l.quantity, 0);
@@ -29,7 +32,7 @@ export function Receipt() {
           </div>
           {sale.tenders.map((t) => (
             <div key={t.id} className="dtrow">
-              <span>{t.method === 'CASH' ? 'Cash' : 'Card'}</span>
+              <span>{tenderShort(t.method, paymentTypes)}</span>
               <span>{fmt(t.amountMinor)}</span>
             </div>
           ))}
@@ -78,7 +81,7 @@ export function Receipt() {
           )}
           <div className="rcpt-print-grand"><span>TOTAL</span><span>{fmt(sale.totalMinor)}</span></div>
           {sale.tenders.map((t) => (
-            <div key={t.id}><span>{t.method === 'CASH' ? 'Cash' : 'Card'}</span><span>{fmt(t.amountMinor)}</span></div>
+            <div key={t.id}><span>{tenderShort(t.method, paymentTypes)}</span><span>{fmt(t.amountMinor)}</span></div>
           ))}
           {sale.changeMinor > 0 && <div><span>Change</span><span>{fmt(sale.changeMinor)}</span></div>}
         </div>

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { dbQuotes } from '../lib/db';
+import type { CartLine } from './cartStore';
 
 // Persisted quotes for Sell → Quotes.
 export type QuoteStatus = 'Draft' | 'Sent' | 'Accepted' | 'Declined' | 'Expired';
@@ -13,6 +14,9 @@ export interface Quote {
   createdAt: number;
   expiresAt: number;
   status: QuoteStatus;
+  /** The quoted items, so the quote can be loaded back into the register. */
+  lines: CartLine[];
+  discountBps: number;
 }
 
 interface QuotesState {
@@ -20,7 +24,7 @@ interface QuotesState {
   quoteSeq: number;
   /** Pull quotes from Supabase. */
   syncFromDb: () => Promise<void>;
-  addQuote: (q: { customer: string; totalMinor: number }) => Quote;
+  addQuote: (q: { customer: string; totalMinor: number; lines?: CartLine[]; discountBps?: number }) => Quote;
   updateQuote: (id: string, patch: Partial<Quote>) => void;
   deleteQuote: (id: string) => void;
 }
@@ -32,6 +36,9 @@ const uid = (): string =>
 
 const FOURTEEN_DAYS = 14 * 24 * 60 * 60 * 1000;
 
+// Whether the cloud table keeps quote lines (migration 0008).
+let hasLinesColumn = true;
+
 const toRow = (q: Quote): Record<string, unknown> => ({
   id: q.id,
   num: q.num,
@@ -40,6 +47,7 @@ const toRow = (q: Quote): Record<string, unknown> => ({
   created_at: new Date(q.createdAt).toISOString(),
   expires_at: new Date(q.expiresAt).toISOString(),
   status: q.status,
+  ...(hasLinesColumn ? { lines: q.lines, discount_bps: q.discountBps } : {}),
 });
 
 const fromRow = (r: Record<string, unknown>): Quote => ({
@@ -50,6 +58,8 @@ const fromRow = (r: Record<string, unknown>): Quote => ({
   createdAt: new Date(r.created_at as string).getTime(),
   expiresAt: new Date(r.expires_at as string).getTime(),
   status: r.status as QuoteStatus,
+  lines: (r.lines as CartLine[] | null) ?? [],
+  discountBps: (r.discount_bps as number | null) ?? 0,
 });
 
 export const useQuotes = create<QuotesState>()(
@@ -61,6 +71,8 @@ export const useQuotes = create<QuotesState>()(
       syncFromDb: async () => {
         const rows = await dbQuotes.list();
         if (!rows) return; // request failed — keep cached quotes
+        const probe = await dbQuotes.hasLines();
+        if (probe !== null) hasLinesColumn = probe;
         const quotes = rows.map(fromRow);
         // Advance the counter past every quote number already in the cloud so a
         // fresh browser can't reissue an existing "Q-####" (num is unique).
@@ -81,6 +93,8 @@ export const useQuotes = create<QuotesState>()(
           createdAt: Date.now(),
           expiresAt: Date.now() + FOURTEEN_DAYS,
           status: 'Draft',
+          lines: q.lines ?? [],
+          discountBps: q.discountBps ?? 0,
         };
         set((s) => ({ quotes: [created, ...s.quotes], quoteSeq: s.quoteSeq + 1 }));
         dbQuotes.upsert(toRow(created));

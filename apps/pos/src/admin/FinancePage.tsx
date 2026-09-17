@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
 import { fmt } from '../lib/format';
+import { methodOf, tenderLabel } from '../lib/tenders';
 import { useCart } from '../store/cartStore';
+import { useSetup } from '../store/setupStore';
 import { useRegisterSession } from '../store/registerSessionStore';
 import '../styles/reporting.css';
 
@@ -15,6 +17,7 @@ export function FinancePage() {
   const openingFloat = useRegisterSession((s) => s.openingFloatMinor);
   const openedAt = useRegisterSession((s) => s.openedAt);
   const regStatus = useRegisterSession((s) => s.status);
+  const paymentTypes = useSetup((s) => s.paymentTypes);
 
   const now = Date.now();
   const todayStart = startOfDay(now);
@@ -26,21 +29,21 @@ export function FinancePage() {
   const sum = (from: number) =>
     sales.filter((s) => s.status !== 'Returned' && s.at >= from).reduce((a, s) => a + s.totalMinor, 0);
 
-  let cash = 0;
-  let card = 0;
-  for (const s of sales)
-    for (const t of s.tenders) {
-      if (t.method === 'CASH') cash += t.amountMinor;
-      else card += t.amountMinor;
-    }
-  const changeGiven = sales.reduce((a, s) => a + s.changeMinor, 0);
-  let cashRefunded = 0;
-  let cardRefunded = 0;
-  for (const s of sales)
-    for (const t of s.refundTenders ?? []) {
-      if (t.method === 'CASH') cashRefunded += t.amountMinor;
-      else cardRefunded += t.amountMinor;
-    }
+  // Collected and refunded per payment type, all time. Cash is net of change.
+  const collected = new Map<string, number>();
+  const refunded = new Map<string, number>();
+  const bump = (m: Map<string, number>, k: string, v: number) => m.set(k, (m.get(k) ?? 0) + v);
+  for (const s of sales) {
+    for (const t of s.tenders) bump(collected, t.method, t.amountMinor);
+    bump(collected, 'CASH', -s.changeMinor);
+    for (const t of s.refundTenders ?? []) bump(refunded, t.method, t.amountMinor);
+  }
+  const methods = [
+    ...paymentTypes.map(methodOf),
+    ...[...collected.keys()].filter((m) => !paymentTypes.some((t) => methodOf(t) === m)),
+  ];
+  const totalCollected = [...collected.values()].reduce((a, v) => a + v, 0);
+  const totalRefunded = [...refunded.values()].reduce((a, v) => a + v, 0);
   const netMovements = movements.reduce((a, m) => a + (m.type === 'ADD' ? m.amountMinor : -m.amountMinor), 0);
   // Cash in the drawer right now: this session's float, movements, cash
   // taken (net of change) and cash handed back as refunds. Earlier sessions
@@ -96,23 +99,21 @@ export function FinancePage() {
             <span>Payment type</span>
             <span className="r">Collected (all time)</span>
           </div>
-          <div className="finc-row">
-            <span>Cash</span>
-            <span className="r">{fmt(Math.max(0, cash - changeGiven))}</span>
-          </div>
-          <div className="finc-row">
-            <span>Card</span>
-            <span className="r">{fmt(card)}</span>
-          </div>
-          {(cashRefunded > 0 || cardRefunded > 0) && (
+          {methods.map((m) => (
+            <div key={m} className="finc-row">
+              <span>{tenderLabel(m, paymentTypes)}</span>
+              <span className="r">{fmt(Math.max(0, collected.get(m) ?? 0))}</span>
+            </div>
+          ))}
+          {totalRefunded > 0 && (
             <div className="finc-row">
-              <span>Refunded (cash {fmt(cashRefunded)} · card {fmt(cardRefunded)})</span>
-              <span className="r">−{fmt(cashRefunded + cardRefunded)}</span>
+              <span>Refunded ({methods.filter((m) => (refunded.get(m) ?? 0) > 0).map((m) => `${tenderLabel(m, paymentTypes).toLowerCase()} ${fmt(refunded.get(m) ?? 0)}`).join(' · ')})</span>
+              <span className="r">−{fmt(totalRefunded)}</span>
             </div>
           )}
           <div className="finc-row">
             <span>Net collected</span>
-            <span className="r">{fmt(Math.max(0, cash - changeGiven) + card - cashRefunded - cardRefunded)}</span>
+            <span className="r">{fmt(Math.max(0, totalCollected - totalRefunded))}</span>
           </div>
         </div>
       </div>

@@ -1,7 +1,13 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { computeTotals } from '../lib/totals';
 import { useCart } from '../store/cartStore';
+import { FULFILLMENT_LABEL, useFulfillments, type FulfillmentKind } from '../store/fulfillmentStore';
+import { useQuotes } from '../store/quotesStore';
 import { useRegisterSession } from '../store/registerSessionStore';
 import { useRegister } from '../store/registerStore';
+import { useSettings } from '../store/settingsStore';
+import { MoneyInput } from '../admin/NumInput';
 import { ParkedTray } from './ParkedTray';
 import { PayModal } from './PayModal';
 import { QuickKeys } from './QuickKeys';
@@ -14,11 +20,31 @@ export function RegisterScreen() {
   const [parkedOpen, setParkedOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
 
+  const nav = useNavigate();
   const lines = useCart((s) => s.lines);
   const lastSale = useCart((s) => s.lastSale);
   const clear = useCart((s) => s.clear);
   const park = useCart((s) => s.park);
+  const customerName = useCart((s) => s.customerName);
+  const orderNote = useCart((s) => s.orderNote);
+  const discountBps = useCart((s) => s.orderDiscountBps);
+  const addCustomLine = useCart((s) => s.addCustomLine);
+  const addQuote = useQuotes((s) => s.addQuote);
+  const addFulfillment = useFulfillments((s) => s.addFulfillment);
+  const taxBps = useSettings((s) => s.defaultTaxRateBps);
   const empty = lines.length === 0;
+  const [serviceOpen, setServiceOpen] = useState(false);
+  const [fulfilOpen, setFulfilOpen] = useState(false);
+
+  // Save the sale as a quote the customer can come back for.
+  const createQuote = () => {
+    if (empty) return;
+    const totalMinor = computeTotals(lines, discountBps, 'USD', taxBps).totalMinor;
+    addQuote({ customer: customerName || 'Walk-in customer', totalMinor, lines, discountBps });
+    clear();
+    setMoreOpen(false);
+    nav('/sell/quotes');
+  };
 
   const training = useRegister((s) => s.trainingMode);
   const quickKeysEnabled = useRegister((s) => s.quickKeysEnabled);
@@ -77,9 +103,9 @@ export function RegisterScreen() {
                 <button onClick={() => { clear(); setMoreOpen(false); }} disabled={empty}>
                   Discard sale
                 </button>
-                <button disabled>Create a quote</button>
-                <button disabled>Create a service sale</button>
-                <button disabled>Mark as unfulfilled</button>
+                <button onClick={createQuote} disabled={empty}>Create a quote</button>
+                <button onClick={() => { setServiceOpen(true); setMoreOpen(false); }}>Create a service sale</button>
+                <button onClick={() => { setFulfilOpen(true); setMoreOpen(false); }} disabled={empty}>Mark as unfulfilled</button>
               </div>
             )}
           </div>
@@ -88,6 +114,19 @@ export function RegisterScreen() {
       </div>
       </div>
 
+      {serviceOpen && <ServiceSaleModal onAdd={(name, priceMinor) => { addCustomLine({ name, priceMinor }); setServiceOpen(false); }} onClose={() => setServiceOpen(false)} />}
+      {fulfilOpen && (
+        <FulfillmentModal
+          customerName={customerName}
+          onClose={() => setFulfilOpen(false)}
+          onSave={(kind, customer, note) => {
+            addFulfillment({ kind, customerName: customer, lines, discountBps, note: note || orderNote });
+            clear();
+            setFulfilOpen(false);
+            nav('/inventory', { state: { tab: 'fulfillments' } });
+          }}
+        />
+      )}
       {registerStatus === 'closed' && <OpenRegisterPrompt />}
       {payOpen && <PayModal onClose={() => setPayOpen(false)} />}
       {parkedOpen && <ParkedTray onClose={() => setParkedOpen(false)} />}
@@ -143,6 +182,83 @@ function OpenRegisterPrompt() {
           <button className="pm-complete" type="submit">
             Open register
           </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/** A one-off service line: a name and a price, no product or stock behind it. */
+function ServiceSaleModal({ onAdd, onClose }: { onAdd: (name: string, priceMinor: number) => void; onClose: () => void }) {
+  const [name, setName] = useState('');
+  const [priceMinor, setPriceMinor] = useState(0);
+  const ok = name.trim().length > 0 && priceMinor > 0;
+  return (
+    <div className="pm-overlay" onClick={onClose}>
+      <div className="pm reg-open" onClick={(e) => e.stopPropagation()} role="dialog">
+        <div className="pm-head">
+          <h2>Create a service sale</h2>
+          <button className="pm-close" onClick={onClose} aria-label="Close">×</button>
+        </div>
+        <form
+          className="reg-open-body"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (ok) onAdd(name.trim(), priceMinor);
+          }}
+        >
+          <p className="reg-open-text">Add a service or other charge that isn’t a catalog product. It’s added to the current sale as its own line.</p>
+          <label className="reg-open-field">
+            <span>Service</span>
+            <input value={name} autoFocus onChange={(e) => setName(e.target.value)} placeholder="e.g. Repair labour" />
+          </label>
+          <label className="reg-open-field">
+            <span>Price ($)</span>
+            <MoneyInput className="" minor={priceMinor} onChange={setPriceMinor} placeholder="0.00" />
+          </label>
+          <button className="pm-complete" type="submit" disabled={!ok}>Add to sale</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/** Park the sale as an order to pack, pick up or deliver; it's paid when retrieved. */
+function FulfillmentModal({ customerName, onSave, onClose }: { customerName: string; onSave: (kind: FulfillmentKind, customer: string, note: string) => void; onClose: () => void }) {
+  const [kind, setKind] = useState<FulfillmentKind>('pickup');
+  const [customer, setCustomer] = useState(customerName);
+  const [note, setNote] = useState('');
+  const ok = customer.trim().length > 0;
+  return (
+    <div className="pm-overlay" onClick={onClose}>
+      <div className="pm reg-open" onClick={(e) => e.stopPropagation()} role="dialog">
+        <div className="pm-head">
+          <h2>Mark as unfulfilled</h2>
+          <button className="pm-close" onClick={onClose} aria-label="Close">×</button>
+        </div>
+        <form
+          className="reg-open-body"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (ok) onSave(kind, customer.trim(), note.trim());
+          }}
+        >
+          <p className="reg-open-text">The sale is saved under Inventory → Fulfillments to be packed, picked up or delivered, and paid for when it’s retrieved.</p>
+          <label className="reg-open-field">
+            <span>Fulfillment type</span>
+            <select value={kind} onChange={(e) => setKind(e.target.value as FulfillmentKind)}>
+              {(Object.keys(FULFILLMENT_LABEL) as FulfillmentKind[]).map((k) => <option key={k} value={k}>{FULFILLMENT_LABEL[k]}</option>)}
+            </select>
+          </label>
+          <label className="reg-open-field">
+            <span>Customer</span>
+            <input value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Customer name" autoFocus={!customerName} />
+          </label>
+          <label className="reg-open-field">
+            <span>Note (optional)</span>
+            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Collect Saturday" />
+          </label>
+          <button className="pm-complete" type="submit" disabled={!ok}>Save as unfulfilled</button>
         </form>
       </div>
     </div>

@@ -18,6 +18,7 @@ import { useProducts, type Product } from '../store/productStore';
 import { useSetup } from '../store/setupStore';
 import { Switch } from './controls';
 import { Field, Section } from './FormLayout';
+import { MoneyInput, NumInput } from './NumInput';
 import '../styles/product-editor.css';
 
 // Full-page stock transaction form, in the Lightspeed layout:
@@ -448,7 +449,7 @@ export function StockTxEditor() {
                     )}
                     <td className="r">
                       <span className="pe-money"><span>$</span>
-                        <input className="pe-input pe-cost" type="number" min={0} step="0.01" value={money(l.costMinor ?? 0)} disabled={locked} onChange={(e) => setLine(i, { costMinor: toMinor(e.target.value) })} />
+                        <MoneyInput className="pe-input pe-cost" minor={l.costMinor ?? 0} disabled={locked} onChange={(v) => setLine(i, { costMinor: v })} />
                       </span>
                     </td>
                     <td className="r">{fmt((useReceived ? receivedQty(l) : l.quantity) * (l.costMinor ?? 0))}</td>
@@ -477,20 +478,16 @@ export function StockTxEditor() {
                   <button type="button" className={draft.details.discountMode === 'pct' ? 'active' : ''} disabled={locked} onClick={() => setDetails({ discountMode: 'pct', discountValue: 0 })}>%</button>
                   <button type="button" className={draft.details.discountMode === 'amount' ? 'active' : ''} disabled={locked} onClick={() => setDetails({ discountMode: 'amount', discountValue: 0 })}>$</button>
                 </span>
-                <input
-                  className="pe-input pe-cost"
-                  type="number"
-                  min={0}
-                  step={draft.details.discountMode === 'pct' ? '0.1' : '0.01'}
-                  disabled={locked}
-                  value={draft.details.discountMode === 'pct' ? String(draft.details.discountValue) : money(draft.details.discountValue)}
-                  onChange={(e) =>
-                    setDetails({
-                      discountValue:
-                        draft.details.discountMode === 'pct' ? Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)) : toMinor(e.target.value),
-                    })
-                  }
-                />
+                {draft.details.discountMode === 'pct' ? (
+                  <NumInput
+                    className="pe-input pe-cost"
+                    disabled={locked}
+                    value={String(draft.details.discountValue)}
+                    onCommit={(t) => setDetails({ discountValue: Math.min(100, Math.max(0, parseFloat(t) || 0)) })}
+                  />
+                ) : (
+                  <MoneyInput className="pe-input pe-cost" disabled={locked} minor={draft.details.discountValue} onChange={(v) => setDetails({ discountValue: v })} />
+                )}
               </span>
               <span className="pe-totval">−{fmt(discount)}</span>
             </div>
@@ -501,7 +498,7 @@ export function StockTxEditor() {
                   {APPLY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
                 <span className="pe-money"><span>$</span>
-                  <input className="pe-input pe-cost" type="number" min={0} step="0.01" disabled={locked} value={money(draft.details.shippingMinor)} onChange={(e) => setDetails({ shippingMinor: toMinor(e.target.value) })} />
+                  <MoneyInput className="pe-input pe-cost" disabled={locked} minor={draft.details.shippingMinor} onChange={(v) => setDetails({ shippingMinor: v })} />
                 </span>
               </span>
               <span className="pe-totval">{fmt(draft.details.shippingMinor)}</span>
@@ -513,7 +510,7 @@ export function StockTxEditor() {
                   {APPLY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
                 <span className="pe-money"><span>$</span>
-                  <input className="pe-input pe-cost" type="number" min={0} step="0.01" disabled={locked} value={money(draft.details.dutyMinor)} onChange={(e) => setDetails({ dutyMinor: toMinor(e.target.value) })} />
+                  <MoneyInput className="pe-input pe-cost" disabled={locked} minor={draft.details.dutyMinor} onChange={(v) => setDetails({ dutyMinor: v })} />
                 </span>
               </span>
               <span className="pe-totval">{fmt(draft.details.dutyMinor)}</span>

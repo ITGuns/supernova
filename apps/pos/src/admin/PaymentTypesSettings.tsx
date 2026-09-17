@@ -42,13 +42,13 @@ export function PaymentTypesSettings() {
     setEditIcon(kindOf(t.icon));
   };
 
-  const addType = () =>
-    set({
-      paymentTypes: [
-        ...types,
-        { id: newId(), name: `Payment ${types.length + 1}`, sub: 'Other payment method', icon: 'card' },
-      ],
-    });
+  // A new type opens straight into its editor so it gets a real name
+  // (Venmo, Zelle, gift voucher, …) before it shows up at the register.
+  const addType = () => {
+    const created: PaymentType = { id: newId(), name: `Payment ${types.length + 1}`, sub: 'Other payment method', icon: 'card' };
+    set({ paymentTypes: [...types, created] });
+    openEdit(created);
+  };
 
   const saveEdit = () => {
     if (editingId === null) return;

@@ -5,6 +5,8 @@ import { ContextNav, type ContextItem } from '../shell/ContextNav';
 import { useAdjustmentReasons, type AdjustmentType } from '../store/adjustmentReasonsStore';
 import { DEFAULT_CATEGORY_ID, categoryDescendantIds, categoryLabel, sortedCategories, useCatalogMeta } from '../store/catalogMetaStore';
 import { tagKey, useProductTags } from '../store/tagStore';
+import { promoLabel, promotionStatus, usePromotions } from '../store/promotionStore';
+import { priceBookActive, usePriceBooks } from '../store/priceBookStore';
 import { availableOf, useProducts, type Product } from '../store/productStore';
 import '../styles/catalog.css';
 import { Switch } from './controls';
@@ -129,6 +131,9 @@ export function CatalogPage() {
   const updateReason = useAdjustmentReasons((s) => s.updateReason);
   const deleteReason = useAdjustmentReasons((s) => s.deleteReason);
   const [reasonModal, setReasonModal] = useState<{ id: string; name: string; type: AdjustmentType; enabled: boolean } | null>(null);
+
+  const promotions = usePromotions((s) => s.promotions);
+  const priceBooks = usePriceBooks((s) => s.priceBooks);
 
   // Product tags — persisted; every tag a product carries has a row of its own too
   const tags = useProductTags((s) => s.tags);
@@ -714,13 +719,73 @@ export function CatalogPage() {
                 </div>
               </div>
             </>
-          ) : active !== 'products' ? (
+          ) : active === 'promotions' ? (
             <>
-              <h1 className="page-title">{label}</h1>
-              <div className="placeholder-card">
-                <div className="placeholder-icon">🧩</div>
-                <div className="placeholder-title">{label}</div>
-                <div className="placeholder-hint">This catalog area is being built.</div>
+              <h1 className="page-title">Promotions</h1>
+              <div className="cat-band">
+                <span>
+                  Run automatic discounts on products, categories or the whole store. <span className="rlink">Need help?</span>
+                </span>
+                <button className="btn-p" onClick={() => navigate('/catalog/promotions/new')}>
+                  Add promotion
+                </button>
+              </div>
+              <div className="ctable">
+                <div className="cthead promo5">
+                  <span>Name</span>
+                  <span>Discount</span>
+                  <span>Applies to</span>
+                  <span>Dates</span>
+                  <span>Status</span>
+                </div>
+                {promotions.length === 0 && <div className="ct-empty">No promotions yet. Add one to discount products automatically at the register.</div>}
+                {promotions.map((p) => {
+                  const status = promotionStatus(p);
+                  const dates = p.startAt || p.endAt ? `${p.startAt ? new Date(p.startAt).toLocaleDateString() : 'Now'} – ${p.endAt ? new Date(p.endAt).toLocaleDateString() : 'no end'}` : 'Always';
+                  return (
+                    <div key={p.id} className="ctrow promo5">
+                      <span className="rlink" onClick={() => navigate(`/catalog/promotions/${p.id}`)}>{p.name}</span>
+                      <span>{promoLabel(p)}</span>
+                      <span>{p.appliesTo === 'all' ? 'All products' : p.appliesTo === 'categories' ? `${p.targetIds.length} categor${p.targetIds.length === 1 ? 'y' : 'ies'}` : `${p.targetIds.length} product${p.targetIds.length === 1 ? '' : 's'}`}</span>
+                      <span className="ct-muted">{dates}</span>
+                      <span><span className={`tx-badge ${status === 'Active' ? 'received' : status === 'Scheduled' ? 'open' : status === 'Expired' ? 'cancelled' : ''}`}>{status}</span></span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : active === 'pricebooks' ? (
+            <>
+              <h1 className="page-title">Price books</h1>
+              <div className="cat-band">
+                <span>
+                  Set special prices for customer groups or outlets. <span className="rlink">Need help?</span>
+                </span>
+                <button className="btn-p" onClick={() => navigate('/catalog/price-books/new')}>
+                  Add price book
+                </button>
+              </div>
+              <div className="ctable">
+                <div className="cthead promo5">
+                  <span>Name</span>
+                  <span>Customer group</span>
+                  <span>Outlet</span>
+                  <span>Valid</span>
+                  <span>Products</span>
+                </div>
+                {priceBooks.length === 0 && <div className="ct-empty">No price books yet. Every product sells at its retail price.</div>}
+                {priceBooks.map((b) => (
+                  <div key={b.id} className="ctrow promo5">
+                    <span className="rlink" onClick={() => navigate(`/catalog/price-books/${b.id}`)}>{b.name}</span>
+                    <span>{b.customerGroup}</span>
+                    <span>{b.outlet || 'All outlets'}</span>
+                    <span className="ct-muted">
+                      {b.startAt || b.endAt ? `${b.startAt ? new Date(b.startAt).toLocaleDateString() : 'Now'} – ${b.endAt ? new Date(b.endAt).toLocaleDateString() : 'no end'}` : 'Always'}
+                      {!priceBookActive(b) && <span className="tx-badge cancelled"> Not active</span>}
+                    </span>
+                    <span>{b.entries.length}</span>
+                  </div>
+                ))}
               </div>
             </>
           ) : (
