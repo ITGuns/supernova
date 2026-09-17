@@ -29,12 +29,18 @@ export function CloseRegister() {
 
   const [qty, setQty] = useState<Record<number, number>>({});
   const [custom, setCustom] = useState('');
+  // Lightspeed offers two ways to count the till: one total, or per denomination.
+  const [countMode, setCountMode] = useState<'total' | 'denomination'>('denomination');
+  const [cashTotalText, setCashTotalText] = useState('');
   // Keyed by payment-row key (see `rows`) plus the two cash fields.
   const [counted, setCounted] = useState<Record<string, string>>({ closingFloat: '', cashToBank: '' });
   const [closeNote, setCloseNote] = useState('');
   const [openFloat, setOpenFloat] = useState('');
 
-  const cashCounted = DENOMS.reduce((sum, d) => sum + d * (qty[d] ?? 0), 0) + Math.round(parseFloat(custom || '0') * 100);
+  const cashCounted =
+    countMode === 'total'
+      ? Math.round(parseFloat(cashTotalText || '0') * 100)
+      : DENOMS.reduce((sum, d) => sum + d * (qty[d] ?? 0), 0) + Math.round(parseFloat(custom || '0') * 100);
 
   const movementNet = movements.reduce((sum, m) => sum + (m.type === 'ADD' ? m.amountMinor : -m.amountMinor), 0);
 
@@ -93,6 +99,7 @@ export function CloseRegister() {
     // Start the next closure with an empty count sheet.
     setQty({});
     setCustom('');
+    setCashTotalText('');
     setCounted({ closingFloat: '', cashToBank: '' });
     setCloseNote('');
   };
@@ -141,8 +148,19 @@ export function CloseRegister() {
       <div className="cr2-row">
         <div className="cr2-side"><div className="cr-h">Count cash</div><div className="set-desc">Enter the amount from the till.</div></div>
         <div className="cr2-main">
-          <div className="cr-count-head"><span>Denomination</span><span className="c">Quantity</span><span className="r">Amount</span></div>
-          {DENOMS.map((d) => (
+          <div className="cr-modes" role="group" aria-label="Count method">
+            <button type="button" className={`cr-mode ${countMode === 'total' ? 'active' : ''}`} onClick={() => setCountMode('total')}>Enter cash total only</button>
+            <button type="button" className={`cr-mode ${countMode === 'denomination' ? 'active' : ''}`} onClick={() => setCountMode('denomination')}>Count cash by denomination</button>
+          </div>
+          {countMode === 'total' && (
+            <div className="cr-count-row cr-total-only">
+              <span>Cash total</span>
+              <span className="c" />
+              <span className="r"><input className="cr-custom" type="number" step="0.01" min="0" value={cashTotalText} onChange={(e) => setCashTotalText(e.target.value)} placeholder="0.00" autoFocus /></span>
+            </div>
+          )}
+          {countMode === 'denomination' && <div className="cr-count-head"><span>Denomination</span><span className="c">Quantity</span><span className="r">Amount</span></div>}
+          {countMode === 'denomination' && DENOMS.map((d) => (
             <div key={d} className="cr-count-row">
               <span>{fmt(d)}</span>
               <span className="c">
@@ -151,11 +169,13 @@ export function CloseRegister() {
               <span className="r">{fmt(d * (qty[d] ?? 0))}</span>
             </div>
           ))}
-          <div className="cr-count-row">
-            <span>Custom amount</span>
-            <span className="c">—</span>
-            <span className="r"><input className="cr-custom" type="number" step="0.01" value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="0.00" /></span>
-          </div>
+          {countMode === 'denomination' && (
+            <div className="cr-count-row">
+              <span>Custom amount</span>
+              <span className="c">—</span>
+              <span className="r"><input className="cr-custom" type="number" step="0.01" value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="0.00" /></span>
+            </div>
+          )}
           <div className="cr-count-total"><span>CASH TOTAL</span><span className="c" /><span className="r">{fmt(cashCounted)}</span></div>
         </div>
       </div>

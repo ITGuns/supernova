@@ -254,3 +254,8 @@
   gap: 12px;
   align-items: center;
 }
+
+/* Expanded promotion row */
+.ct-expand { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 10px 6px 14px; border-bottom: 1px solid var(--line); background: var(--panel-2); flex-wrap: wrap; }
+.ct-expand-info { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.ct-expand-actions { display: flex; gap: 8px; flex-wrap: wrap; }

@@ -38,6 +38,17 @@ export function RegisterStatus() {
   };
 
   const time = (t: number) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  // Drop the browser's cached copy of the store data (everything except who
+  // is logged in) and reload, so it's rebuilt from the cloud.
+  const resetLocalData = () => {
+    const keep = new Set(['nova-users-v3', 'nova-theme']);
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('nova-') && !keep.has(key)) localStorage.removeItem(key);
+    }
+    window.location.reload();
+  };
 
   const rows: Row[] = [
     online
@@ -71,6 +82,27 @@ export function RegisterStatus() {
             <span className={`st-status ${r.tone}`}>{r.status}</span>
           </div>
         ))}
+      </div>
+
+      <div className="rs-section st-reset">
+        <div className="rs-side">
+          <div className="cr-h">Reset local data</div>
+        </div>
+        <div className="rs-main">
+          <div className="rs-desc">
+            We keep a copy of some of your store data in your web browser so you can keep selling if you lose your Internet
+            connection. Sometimes, this gets out of sync. Resetting it can help if you're having trouble with Nova Retail.
+          </div>
+          {confirmReset ? (
+            <div className="st-reset-actions">
+              <span>Reset the data cached in this browser and reload from the cloud?</span>
+              <button className="btn-s" onClick={() => setConfirmReset(false)}>Cancel</button>
+              <button className="btn-primary" onClick={resetLocalData}>Reset data</button>
+            </div>
+          ) : (
+            <button className="btn-s" onClick={() => setConfirmReset(true)}>Reset data</button>
+          )}
+        </div>
       </div>
     </main>
   );

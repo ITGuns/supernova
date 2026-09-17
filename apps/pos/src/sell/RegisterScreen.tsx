@@ -7,6 +7,8 @@ import { useQuotes } from '../store/quotesStore';
 import { useRegisterSession } from '../store/registerSessionStore';
 import { useRegister } from '../store/registerStore';
 import { useSettings } from '../store/settingsStore';
+import { useUsers } from '../store/userStore';
+import { useCustomers } from '../store/customerStore';
 import { MoneyInput } from '../admin/NumInput';
 import { ParkedTray } from './ParkedTray';
 import { PayModal } from './PayModal';
@@ -35,14 +37,22 @@ export function RegisterScreen() {
   const empty = lines.length === 0;
   const [serviceOpen, setServiceOpen] = useState(false);
   const [fulfilOpen, setFulfilOpen] = useState(false);
+  const [parkOpen, setParkOpen] = useState(false);
+  const [quoteOpen, setQuoteOpen] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
+  const assignAllLines = useCart((s) => s.assignAllLines);
+  const openSaleNumber = useCart((s) => s.openSaleNumber);
+  const users = useUsers((s) => s.users);
+  const customers = useCustomers((s) => s.customers);
+  const attachedEmail = customers.find((c) => `${c.firstName} ${c.lastName}`.trim().toLowerCase() === customerName.trim().toLowerCase())?.email ?? '';
 
   // Save the sale as a quote the customer can come back for.
-  const createQuote = () => {
+  const createQuote = (note: string) => {
     if (empty) return;
     const totalMinor = computeTotals(lines, discountBps, 'USD', taxBps).totalMinor;
-    addQuote({ customer: customerName || 'Walk-in customer', totalMinor, lines, discountBps });
+    addQuote({ customer: customerName || 'Walk-in customer', totalMinor, lines, discountBps, note });
     clear();
-    setMoreOpen(false);
+    setQuoteOpen(false);
     nav('/sell/quotes');
   };
 
@@ -91,7 +101,7 @@ export function RegisterScreen() {
           <button className="reg-action retrieve" onClick={() => setParkedOpen(true)}>
             <span className="ra-ic">↗</span> Retrieve sale
           </button>
-          <button className="reg-action" disabled={empty} onClick={park}>
+          <button className="reg-action" disabled={empty || !!openSaleNumber} onClick={() => setParkOpen(true)}>
             <span className="ra-ic">◷</span> Park sale
           </button>
           <div className="reg-more">
@@ -100,12 +110,13 @@ export function RegisterScreen() {
             </button>
             {moreOpen && (
               <div className="reg-more-menu" onMouseLeave={() => setMoreOpen(false)}>
-                <button onClick={() => { clear(); setMoreOpen(false); }} disabled={empty}>
-                  Discard sale
-                </button>
-                <button onClick={createQuote} disabled={empty}>Create a quote</button>
+                <button onClick={() => { setQuoteOpen(true); setMoreOpen(false); }} disabled={empty || !!openSaleNumber}>Create a quote</button>
                 <button onClick={() => { setServiceOpen(true); setMoreOpen(false); }}>Create a service sale</button>
-                <button onClick={() => { setFulfilOpen(true); setMoreOpen(false); }} disabled={empty}>Mark as unfulfilled</button>
+                <button onClick={() => { setFulfilOpen(true); setMoreOpen(false); }} disabled={empty || !!openSaleNumber}>Mark as unfulfilled</button>
+                <button onClick={() => { setAssignOpen(true); setMoreOpen(false); }} disabled={empty}>Assign all sale items</button>
+                <button onClick={() => { clear(); setMoreOpen(false); }} disabled={empty}>
+                  {openSaleNumber ? 'Dismiss sale' : 'Discard sale'}
+                </button>
               </div>
             )}
           </div>
@@ -114,6 +125,45 @@ export function RegisterScreen() {
       </div>
       </div>
 
+      {parkOpen && (
+        <NoteModal
+          title="Park sale"
+          text="Put this sale on hold to finish later. Add a note to make it easy to find."
+          placeholder="Note (optional)"
+          confirm="Park sale"
+          onClose={() => setParkOpen(false)}
+          onConfirm={(note) => { park(note); setParkOpen(false); }}
+        />
+      )}
+      {quoteOpen && (
+        <NoteModal
+          title="Create quote"
+          text={attachedEmail ? `A copy of the quote can be emailed to ${attachedEmail}.` : 'Quotes are saved under Sell → Quotes and can be converted to a sale later.'}
+          placeholder="Add a note to the quote (optional)"
+          confirm="Complete quote"
+          emailTo={attachedEmail || undefined}
+          onClose={() => setQuoteOpen(false)}
+          onConfirm={createQuote}
+        />
+      )}
+      {assignOpen && (
+        <div className="pm-overlay" onClick={() => setAssignOpen(false)}>
+          <div className="pm reg-open" onClick={(e) => e.stopPropagation()} role="dialog">
+            <div className="pm-head">
+              <h2>Assign all sale items</h2>
+              <button className="pm-close" onClick={() => setAssignOpen(false)} aria-label="Close">×</button>
+            </div>
+            <div className="reg-open-body">
+              <p className="reg-open-text">Attribute every item in this sale to one staff member.</p>
+              <div className="reg-userlist">
+                {users.filter((u) => u.enabled).map((u) => (
+                  <button key={u.id} className="btn-s" onClick={() => { assignAllLines(u.name); setAssignOpen(false); }}>{u.name}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {serviceOpen && <ServiceSaleModal onAdd={(name, priceMinor) => { addCustomLine({ name, priceMinor }); setServiceOpen(false); }} onClose={() => setServiceOpen(false)} />}
       {fulfilOpen && (
         <FulfillmentModal
@@ -259,6 +309,42 @@ function FulfillmentModal({ customerName, onSave, onClose }: { customerName: str
             <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Collect Saturday" />
           </label>
           <button className="pm-complete" type="submit" disabled={!ok}>Save as unfulfilled</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/** A small confirm dialog with an optional note (Park sale, Create quote). */
+function NoteModal({ title, text, placeholder, confirm, emailTo, onConfirm, onClose }: { title: string; text: string; placeholder: string; confirm: string; emailTo?: string; onConfirm: (note: string) => void; onClose: () => void }) {
+  const [note, setNote] = useState('');
+  const [email, setEmail] = useState(!!emailTo);
+  return (
+    <div className="pm-overlay" onClick={onClose}>
+      <div className="pm reg-open" onClick={(e) => e.stopPropagation()} role="dialog">
+        <div className="pm-head">
+          <h2>{title}</h2>
+          <button className="pm-close" onClick={onClose} aria-label="Close">×</button>
+        </div>
+        <form
+          className="reg-open-body"
+          onSubmit={(e) => {
+            e.preventDefault();
+            onConfirm(note.trim());
+          }}
+        >
+          <p className="reg-open-text">{text}</p>
+          {emailTo && (
+            <label className="reg-check">
+              <input type="checkbox" checked={email} onChange={(e) => setEmail(e.target.checked)} />
+              <span>Email quote to {emailTo}</span>
+            </label>
+          )}
+          <label className="reg-open-field">
+            <span>Note</span>
+            <input value={note} autoFocus onChange={(e) => setNote(e.target.value)} placeholder={placeholder} />
+          </label>
+          <button className="pm-complete" type="submit">{confirm}</button>
         </form>
       </div>
     </div>

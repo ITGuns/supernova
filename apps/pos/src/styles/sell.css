@@ -191,3 +191,105 @@ select.sh-input {
   padding: 8px 12px;
   border-bottom: 1px solid var(--line);
 }
+
+/* Cash management: movement kinds + set float */
+.csm-kinds {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.csm-kind {
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font: inherit;
+  color: var(--text);
+}
+.csm-kind span { font-size: 12.5px; color: var(--muted); }
+.csm-kind.active { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary) inset; }
+.csm-money { display: flex; align-items: center; gap: 6px; }
+.csm-money span { color: var(--muted); }
+.csm-opt { font-weight: 400; color: var(--muted); font-size: 12px; }
+
+/* Close register: count method */
+.cr-modes { display: flex; gap: 10px; margin-bottom: 14px; }
+.cr-mode {
+  flex: 1;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+}
+.cr-mode.active { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary) inset; }
+
+/* Status: reset local data */
+.st-reset { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--line); }
+.st-reset-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; font-size: 14px; }
+
+/* Sale line editing */
+.dline.open { background: var(--panel-2); }
+.dline-row { display: contents; }
+.dline-chev { color: var(--muted); font-size: 12px; margin-right: 2px; }
+.dline-lock { margin-left: 6px; font-size: 12px; }
+.dline-main { cursor: pointer; }
+.dline-note { color: var(--muted); }
+.dline-edit {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px 14px;
+  padding: 8px 4px 12px;
+}
+.dline-edit label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); font-weight: 600; }
+.dline-edit label.wide { grid-column: 1 / -1; }
+.dline-in { height: 34px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); padding: 0 8px; font: inherit; font-size: 13px; width: 100%; box-sizing: border-box; }
+.dline-in:disabled { opacity: 0.6; }
+.dline.locked .dstepper button, .dline.locked .dline-x { opacity: 0.35; cursor: not-allowed; }
+.dcart-cust-name { flex: 1; display: flex; flex-direction: column; font-size: 14px; color: var(--text); }
+.dcart-cust-sub { font-size: 12px; color: var(--muted); }
+.dcart-cust-x { border: 0; background: none; cursor: pointer; font-size: 14px; }
+.dcart-addcust { margin: 0 12px 6px; border: 0; background: none; color: var(--link); font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; }
+.dcart-open { margin: 0 12px 8px; padding: 8px 10px; border-radius: 6px; background: rgba(75, 61, 245, 0.12); color: var(--text); font-size: 12.5px; }
+.dtrow-x { border: 0; background: none; cursor: pointer; margin-left: 8px; font-size: 12px; }
+.dtrow-link { border: 0; background: none; cursor: pointer; margin-left: 8px; color: var(--link); font: inherit; font-size: 12px; font-weight: 600; }
+.reg-seg { margin-bottom: 4px; }
+.reg-seg button { min-width: 48px; }
+.reg-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.reg-check { display: flex; gap: 10px; align-items: center; font-size: 14px; color: var(--text); }
+.reg-userlist { display: flex; flex-wrap: wrap; gap: 8px; }
+.pm-email { padding: 10px 0 0; }
+.pm-alt { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); }
+.pm-later { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pm-ref { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.pm-ref-in { height: 40px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); padding: 0 12px; font-size: 15px; }
+.rcpt-email { font-size: 13px; color: var(--muted); margin-top: 4px; }
+
+/* Quotes: expanded row */
+.qt-row { cursor: pointer; }
+.qt-expand { padding: 10px 14px 14px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+.qt-lines { margin-bottom: 10px; }
+.qt-muted { font-size: 12.5px; color: var(--muted); padding: 4px 0; }
+.qt-actions2 { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.qt-del2 { margin-left: auto; }
+
+/* Sales history: time range, actions, void notice */
+.sh-timerange { display: inline-flex; align-items: center; gap: 6px; }
+.sh-timerange .sh-input { width: 110px; }
+.sh-actions { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 0 2px; }
+.sh-pay span:first-child { color: var(--muted); }
+.sh-notice { margin: 10px 0; padding: 10px 14px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); font-size: 14px; }
+.sh-open { margin-bottom: 18px; }
+.rcpt-emailform { display: flex; gap: 8px; margin: 12px 0 0; }
+.rcpt-emailform input { flex: 1; height: 36px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); padding: 0 10px; font: inherit; }
+.rcpt-actions { flex-wrap: wrap; }

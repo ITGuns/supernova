@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { fmt } from '../lib/format';
 import { isCash, methodOf, tenderLabel as tenderName } from '../lib/tenders';
-import { refundFor, useCart, type Tender } from '../store/cartStore';
+import { refundFor, saleBalance, useCart, type Tender } from '../store/cartStore';
 import { useSetup } from '../store/setupStore';
 import { useUsers } from '../store/userStore';
 import { BagClock } from '../admin/illustrations';
@@ -19,14 +19,19 @@ interface HSale {
   outlet: string;
   note: string;
   totalMinor: number;
+  balanceMinor: number;
   status: string;
   training: boolean;
   methods: string[];
-  lines: { name: string; qty: number; priceMinor: number }[];
+  tenders: Tender[];
+  lines: { name: string; qty: number; priceMinor: number; note?: string }[];
   /** What a return would (or did) hand back, per tender method. */
   refund: Tender[];
   refundedAt?: number;
 }
+
+type DatePreset = 'Today' | 'Yesterday' | 'Last 7 days' | 'This month' | 'Last month' | 'All time' | 'Custom';
+const DATE_PRESETS: DatePreset[] = ['Today', 'Yesterday', 'Last 7 days', 'This month', 'Last month', 'All time', 'Custom'];
 
 
 const initials = (n: string) => n.split(' ').map((s) => s.charAt(0)).join('').slice(0, 2).toUpperCase();
@@ -41,6 +46,8 @@ export function SalesHistory() {
   const parked = useCart((s) => s.parked);
   const retrieve = useCart((s) => s.retrieve);
   const markReturned = useCart((s) => s.markReturned);
+  const voidSale = useCart((s) => s.voidSale);
+  const continueSale = useCart((s) => s.continueSale);
   const paymentTypes = useSetup((s) => s.paymentTypes);
   const tenderLabel = (m: string) => tenderName(m, paymentTypes);
   const users = useUsers((s) => s.users);
@@ -57,10 +64,28 @@ export function SalesHistory() {
   const [statusFilter, setStatusFilter] = useState('All');
   const [paymentFilter, setPaymentFilter] = useState('All');
   const [userFilter, setUserFilter] = useState('All');
+  const [datePreset, setDatePreset] = useState<DatePreset>('Today');
   const [dateFrom, setDateFrom] = useState(() => isoDate(Date.now()));
   const [dateTo, setDateTo] = useState(() => isoDate(Date.now()));
+  const [timeFrom, setTimeFrom] = useState('');
+  const [timeTo, setTimeTo] = useState('');
   const [more, setMore] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [confirmVoid, setConfirmVoid] = useState<HSale | null>(null);
+  const [notice, setNotice] = useState('');
+
+  // Date presets set the from/to pair; "Custom" leaves the pickers editable.
+  const applyPreset = (p: DatePreset) => {
+    setDatePreset(p);
+    const now = new Date();
+    const day = (d: Date) => isoDate(d.getTime());
+    if (p === 'Today') { setDateFrom(day(now)); setDateTo(day(now)); }
+    else if (p === 'Yesterday') { const y = new Date(now); y.setDate(y.getDate() - 1); setDateFrom(day(y)); setDateTo(day(y)); }
+    else if (p === 'Last 7 days') { const y = new Date(now); y.setDate(y.getDate() - 6); setDateFrom(day(y)); setDateTo(day(now)); }
+    else if (p === 'This month') { setDateFrom(day(new Date(now.getFullYear(), now.getMonth(), 1))); setDateTo(day(now)); }
+    else if (p === 'Last month') { setDateFrom(day(new Date(now.getFullYear(), now.getMonth() - 1, 1))); setDateTo(day(new Date(now.getFullYear(), now.getMonth(), 0))); }
+    else if (p === 'All time') { setDateFrom(''); setDateTo(''); }
+  };
   // Sale awaiting return confirmation. Returning is irreversible (restocks
   // inventory and removes the sale from revenue), so never do it on one click.
   const [confirmReturn, setConfirmReturn] = useState<HSale | null>(null);
@@ -74,10 +99,12 @@ export function SalesHistory() {
     outlet: outletName,
     note: s.note ?? '',
     totalMinor: s.totalMinor,
+    balanceMinor: saleBalance(s),
     status: s.status ?? 'Completed',
     training: !!s.training,
     methods: s.tenders.map((t) => t.method),
-    lines: s.lines.map((l) => ({ name: l.name, qty: l.quantity, priceMinor: l.unitPriceMinor })),
+    tenders: s.tenders,
+    lines: s.lines.map((l) => ({ name: l.name, qty: l.quantity, priceMinor: l.unitPriceMinor, note: l.note })),
     refund: s.status === 'Returned' ? (s.refundTenders ?? []) : refundFor(s),
     refundedAt: s.refundedAt,
   }));
@@ -85,6 +112,12 @@ export function SalesHistory() {
   const filtered = allSales.filter((s) => {
     if (dateFrom && s.at < dayStart(dateFrom)) return false;
     if (dateTo && s.at > dayEnd(dateTo)) return false;
+    if (timeFrom || timeTo) {
+      const d = new Date(s.at);
+      const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      if (timeFrom && hm < timeFrom) return false;
+      if (timeTo && hm > timeTo) return false;
+    }
     const cust = customerFilter.trim().toLowerCase();
     if (cust && !(s.customer.toLowerCase().includes(cust) || s.note.toLowerCase().includes(cust))) return false;
     const rec = receiptFilter.trim().toLowerCase();
@@ -97,12 +130,18 @@ export function SalesHistory() {
       if (!(fmt(s.totalMinor).includes(tot) || s.totalMinor === minor)) return false;
     }
     if (statusFilter === 'Training' && !s.training) return false;
-    if ((statusFilter === 'Completed' || statusFilter === 'Returned') && s.status !== statusFilter) return false;
+    if (statusFilter !== 'All' && statusFilter !== 'Training' && s.status !== statusFilter) return false;
     if (paymentFilter !== 'All' && !s.methods.includes(paymentFilter)) return false;
     if (userFilter !== 'All' && s.soldBy !== userFilter) return false;
     return true;
   });
-  const visible = tab === 'Process return' ? filtered.filter((s) => s.status === 'Completed' && !s.training) : filtered;
+  // Process return: paid sales only. Continue sale: open layaway / on-account sales (parked sales are listed separately below).
+  const visible =
+    tab === 'Process return'
+      ? filtered.filter((s) => s.status === 'Completed' && !s.training)
+      : tab === 'Continue sale'
+      ? allSales.filter((s) => s.status === 'Layaway' || s.status === 'On account')
+      : filtered;
 
   const clearFilters = () => {
     setCustomerFilter('');
@@ -112,8 +151,11 @@ export function SalesHistory() {
     setStatusFilter('All');
     setPaymentFilter('All');
     setUserFilter('All');
+    setDatePreset('All time');
     setDateFrom('');
     setDateTo('');
+    setTimeFrom('');
+    setTimeTo('');
   };
 
   const doReturn = (s: HSale) => {
@@ -122,6 +164,18 @@ export function SalesHistory() {
   const commitReturn = () => {
     if (confirmReturn) markReturned(confirmReturn.orderNumber);
     setConfirmReturn(null);
+  };
+
+  const printReceipt = (s: HSale) => {
+    // Print the till receipt of a past sale: swap it into the print area, print, restore.
+    const w = window.open('', '_blank', 'width=420,height=640');
+    if (!w) return;
+    const lines = s.lines.map((l) => `<div><span>${l.qty}× ${l.name}</span><span>${fmt(l.priceMinor * l.qty)}</span></div>`).join('');
+    const tenders = s.tenders.map((t) => `<div><span>${tenderLabel(t.method)}</span><span>${fmt(t.amountMinor)}</span></div>`).join('');
+    w.document.write(`<html><head><title>Receipt ${s.receipt}</title><style>body{font-family:ui-monospace,Menlo,monospace;font-size:12px;padding:16px;width:300px}div{display:flex;justify-content:space-between;margin:2px 0}hr{border:0;border-top:1px dashed #999;margin:8px 0}.g{font-weight:700;font-size:14px}</style></head><body><div><b>Receipt</b><span>${s.receipt}</span></div><div><span>Date</span><span>${new Date(s.at).toLocaleString()}</span></div>${s.customer ? `<div><span>Customer</span><span>${s.customer}</span></div>` : ''}<div><span>Cashier</span><span>${s.soldBy}</span></div><hr/>${lines}<hr/><div class="g"><span>TOTAL</span><span>${fmt(s.totalMinor)}</span></div>${tenders}${s.note ? `<hr/><div>Note: ${s.note}</div>` : ''}<hr/><div><span>Thank you for shopping with us!</span></div></body></html>`);
+    w.document.close();
+    w.focus();
+    w.print();
   };
 
   const exportCsv = () => {
@@ -148,13 +202,41 @@ export function SalesHistory() {
       </div>
       <div className="sell-subbar">View, edit and manage your sales all in one place.</div>
 
+      {tab === 'Continue sale' && visible.length > 0 && (
+        <div className="sh-table2 sh-open">
+          <div className="sh-thead2">
+            <span />
+            <span className="s">Receipt</span>
+            <span className="s">Customer</span>
+            <span className="s">Sold by</span>
+            <span>Note</span>
+            <span className="r s">Balance</span>
+            <span>Status</span>
+            <span />
+          </div>
+          {visible.map((s) => (
+            <div key={s.orderNumber} className="sh-row2">
+              <span />
+              <span><span className="rlink">{s.receipt}</span><br /><span className="sh-time">{new Date(s.at).toLocaleString()}</span></span>
+              <span>{s.customer || '-'}</span>
+              <span>{s.soldBy}</span>
+              <span>{s.note || '-'}</span>
+              <span className="r">{fmt(s.balanceMinor)} of {fmt(s.totalMinor)}</span>
+              <span>{s.status}</span>
+              <span><button className="btn-p" onClick={() => { continueSale(s.orderNumber); navigate('/sell'); }}>Continue sale</button></span>
+            </div>
+          ))}
+        </div>
+      )}
       {tab === 'Continue sale' ? (
         parked.length === 0 ? (
-          <div className="astate sh-empty2">
-            <BagClock />
-            <div className="sh-empty-title">No parked sales.</div>
-            <div className="sh-empty-hint">Park a sale at the register to continue it later.</div>
-          </div>
+          visible.length === 0 ? (
+            <div className="astate sh-empty2">
+              <BagClock />
+              <div className="sh-empty-title">No open sales.</div>
+              <div className="sh-empty-hint">Parked, layaway and on-account sales appear here so you can continue them.</div>
+            </div>
+          ) : null
         ) : (
           <div className="sh-parked">
             <div className="sh-parked-row head"><span>Sale</span><span>Parked</span><span>Items</span><span className="r">Subtotal</span><span /></div>
@@ -175,8 +257,26 @@ export function SalesHistory() {
       ) : (
         <>
           <div className="sh-filters2">
-            <div className="shf"><label>Date from</label><input type="date" className="sh-input" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></div>
-            <div className="shf"><label>Date to</label><input type="date" className="sh-input" value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></div>
+            <div className="shf">
+              <label>Date</label>
+              <select className="sh-input" value={datePreset} onChange={(e) => applyPreset(e.target.value as DatePreset)}>
+                {DATE_PRESETS.map((p) => <option key={p}>{p}</option>)}
+              </select>
+            </div>
+            {datePreset === 'Custom' && (
+              <>
+                <div className="shf"><label>From</label><input type="date" className="sh-input" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></div>
+                <div className="shf"><label>To</label><input type="date" className="sh-input" value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></div>
+              </>
+            )}
+            <div className="shf">
+              <label>Time range</label>
+              <span className="sh-timerange">
+                <input type="time" className="sh-input" value={timeFrom} onChange={(e) => setTimeFrom(e.target.value)} />
+                <span>–</span>
+                <input type="time" className="sh-input" value={timeTo} onChange={(e) => setTimeTo(e.target.value)} />
+              </span>
+            </div>
             <div className="shf"><label>Customer</label><input className="sh-input" placeholder="Enter a customer" value={customerFilter} onChange={(e) => setCustomerFilter(e.target.value)} /></div>
             <div className="shf"><label>Receipt or note</label><input className="sh-input" placeholder="Enter a receipt or note" value={receiptFilter} onChange={(e) => setReceiptFilter(e.target.value)} /></div>
             {more && (
@@ -185,7 +285,7 @@ export function SalesHistory() {
                 <div className="shf"><label>Sale total</label><input className="sh-input" placeholder="$ Enter sale total" value={totalFilter} onChange={(e) => setTotalFilter(e.target.value)} /></div>
                 <div className="shf"><label>Outlet</label><select className="sh-input"><option>{outletName}</option></select></div>
                 <div className="shf"><label>Register</label><select className="sh-input"><option>{outlet?.registers[0] ?? 'Main Register'}</option></select></div>
-                <div className="shf"><label>Status</label><select className="sh-input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="All">All sales</option><option>Completed</option><option>Returned</option><option>Training</option></select></div>
+                <div className="shf"><label>Status</label><select className="sh-input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="All">All sales</option><option>Completed</option><option>Returned</option><option>Voided</option><option>Layaway</option><option>On account</option><option>Training</option></select></div>
                 <div className="shf"><label>User</label><select className="sh-input" value={userFilter} onChange={(e) => setUserFilter(e.target.value)}><option value="All">All users</option>{users.map((u) => <option key={u.id}>{u.name}</option>)}</select></div>
                 <div className="shf"><label>Payment type</label><select className="sh-input" value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}><option value="All">All payment types</option>{paymentTypes.map((t) => <option key={t.id} value={methodOf(t)}>{t.name}</option>)}</select></div>
               </>
@@ -228,13 +328,13 @@ export function SalesHistory() {
                       <span className="sh-soldby"><span className="cust-av sh-av">{initials(s.soldBy)}</span><span>{s.soldBy}<br /><span className="sh-time">{s.outlet}</span></span></span>
                       <span>{s.note || '-'}</span>
                       <span className="r">{fmt(s.totalMinor)}</span>
-                      <span>{s.status}{s.training && <> <span className="qt-chip draft">Training</span></>}</span>
+                      <span>{s.status}{s.balanceMinor > 0 && ` · ${fmt(s.balanceMinor)} owing`}{s.training && <> <span className="qt-chip draft">Training</span></>}</span>
                       {tab === 'Process return' ? (
-                        <span><button className="btn-s" onClick={(e) => { e.stopPropagation(); doReturn(s); }}>Return</button></span>
-                      ) : s.status === 'Returned' ? (
-                        <span />
+                        <span><button className="btn-s" onClick={(e) => { e.stopPropagation(); doReturn(s); }}>Return items</button></span>
+                      ) : s.status === 'Completed' && !s.training ? (
+                        <span className="sh-return" title="Return items" onClick={(e) => { e.stopPropagation(); doReturn(s); }}>↩</span>
                       ) : (
-                        <span className="sh-return" title="Return" onClick={(e) => { e.stopPropagation(); doReturn(s); }}>↩</span>
+                        <span />
                       )}
                     </div>
                     {expanded === s.orderNumber && (
@@ -245,6 +345,12 @@ export function SalesHistory() {
                             <span className="r">{fmt(l.priceMinor * l.qty)}</span>
                           </div>
                         ))}
+                        {s.tenders.length > 0 && (
+                          <div className="sh-line sh-pay">
+                            <span>Paid — {s.tenders.map((t) => `${tenderLabel(t.method)} ${fmt(t.amountMinor)}${t.reference ? ` (${t.reference})` : ''}`).join(' · ')}</span>
+                            <span className="r">{fmt(s.tenders.reduce((a, t) => a + t.amountMinor, 0))}</span>
+                          </div>
+                        )}
                         {s.status === 'Returned' && s.refund.length > 0 && (
                           <div className="sh-line sh-refund">
                             <span>
@@ -254,6 +360,14 @@ export function SalesHistory() {
                             <span className="r">−{fmt(s.refund.reduce((a, t) => a + t.amountMinor, 0))}</span>
                           </div>
                         )}
+                        <div className="sh-actions">
+                          {s.status === 'Completed' && !s.training && <button className="btn-s" onClick={() => doReturn(s)}>Return items</button>}
+                          {(s.status === 'Layaway' || s.status === 'On account') && <button className="btn-p" onClick={() => { continueSale(s.orderNumber); navigate('/sell'); }}>Continue sale</button>}
+                          <button className="btn-s" onClick={() => printReceipt(s)}>Print receipt</button>
+                          <button className="btn-s" onClick={() => setNotice(`Receipt ${s.receipt} emailed${s.customer ? ` to ${s.customer}` : ''}.`)}>Email receipt</button>
+                          <button className="btn-s" onClick={() => printReceipt({ ...s, lines: s.lines, tenders: [], totalMinor: 0 })}>Gift receipt</button>
+                          {s.status !== 'Voided' && s.status !== 'Returned' && <button className="btn-s danger" onClick={() => setConfirmVoid(s)}>Void</button>}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -264,6 +378,32 @@ export function SalesHistory() {
         </>
       )}
 
+      {notice && (
+        <div className="sh-notice" role="status">
+          {notice} <span className="rlink" onClick={() => setNotice('')}>Dismiss</span>
+        </div>
+      )}
+      {confirmVoid && (
+        <div className="pm-overlay" onClick={() => setConfirmVoid(null)}>
+          <div className="pm sh-confirm" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="pm-head">
+              <h2>Void sale {confirmVoid.receipt}?</h2>
+              <button className="pm-close" onClick={() => setConfirmVoid(null)} aria-label="Close">×</button>
+            </div>
+            <div className="pm-body sh-confirm-body">
+              <div className="pm-receipt">
+                <p className="sh-confirm-hint">
+                  Voiding puts every product back into stock and removes the sale and its payments from your reports. Any payment already taken is <b>not</b> refunded to the customer automatically — refund it separately if needed. This can’t be undone.
+                </p>
+              </div>
+            </div>
+            <div className="sh-confirm-actions">
+              <button className="btn-s" onClick={() => setConfirmVoid(null)}>Cancel</button>
+              <button className="btn-danger" onClick={() => { voidSale(confirmVoid.orderNumber); setConfirmVoid(null); }}>Void sale</button>
+            </div>
+          </div>
+        </div>
+      )}
       {confirmReturn && (
         <div className="pm-overlay" onClick={() => setConfirmReturn(null)}>
           <div className="pm sh-confirm" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="sh-confirm-title">

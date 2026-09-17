@@ -23,6 +23,14 @@ export interface CartLine {
   priceNote?: string;
   /** A one-off service line typed at the register (no product, no stock). */
   custom?: boolean;
+  /** Percentage typed on the line itself (0–100). */
+  discountPct?: number;
+  /** Line note, printed on the receipt. */
+  note?: string;
+  /** Staff member the line is attributed to. */
+  soldBy?: string;
+  /** Lines of a continued layaway / on-account sale can't be edited. */
+  locked?: boolean;
 }
 
 /** The customer group of the customer attached to the sale, by name. */
@@ -40,12 +48,14 @@ const customerGroupOf = (customerName: string): string | null => {
 export const pricedFor = (
   item: Pick<CatalogItem, 'id' | 'productId' | 'categoryId' | 'priceMinor'>,
   customerName: string,
+  promoCode = '',
 ): { unitPriceMinor: number; basePriceMinor: number; priceNote?: string } => {
   const base = item.priceMinor;
-  const pb = priceBookPrice(item.id, customerGroupOf(customerName), usePriceBooks.getState().priceBooks);
+  const group = customerGroupOf(customerName);
+  const pb = priceBookPrice(item.id, group, usePriceBooks.getState().priceBooks);
   let price = pb ? pb.priceMinor : base;
   let note = pb ? pb.book.name : undefined;
-  const promo = bestPromotion(item, price, usePromotions.getState().promotions, useCatalogMeta.getState().categories);
+  const promo = bestPromotion(item, price, usePromotions.getState().promotions, useCatalogMeta.getState().categories, { group, promoCode });
   if (promo) {
     price = promo.priceMinor;
     note = `${promo.promotion.name} · ${promoLabel(promo.promotion)}`;
@@ -74,6 +84,8 @@ export interface Tender {
   id: string;
   method: TenderMethod;
   amountMinor: number;
+  /** Check number etc., when the payment type asks for one. */
+  reference?: string;
 }
 
 export interface SaleLine {
@@ -84,7 +96,17 @@ export interface SaleLine {
   variantId?: string;
   /** Supplier cost per unit when the sale was made — the basis for gross profit. */
   costMinor?: number;
+  discountPct?: number;
+  note?: string;
+  soldBy?: string;
 }
+
+/**
+ * Completed: paid in full. Layaway / On account: open, paid partly or not at
+ * all, continued from Sales history. Returned: refunded. Voided: cancelled
+ * without a refund (stock back, payments dropped from reports).
+ */
+export type SaleStatus = 'Completed' | 'Returned' | 'Voided' | 'Layaway' | 'On account';
 
 export interface CompletedSale {
   orderNumber: string;
@@ -101,11 +123,22 @@ export interface CompletedSale {
   customer?: string;
   note?: string;
   soldBy?: string;
-  status?: 'Completed' | 'Returned';
+  status?: SaleStatus;
   /** What went back to the customer on return — one entry per original method. */
   refundTenders?: Tender[];
   refundedAt?: number;
+  /** Taken so far on a layaway / on-account sale (net of change). */
+  paidMinor?: number;
+  voidedAt?: number;
+  /** Reference typed for a check / other payment type. */
+  emailReceipt?: boolean;
 }
+
+/** What is still owed on a sale. */
+export const saleBalance = (s: CompletedSale): number =>
+  s.status === 'Layaway' || s.status === 'On account' ? Math.max(0, s.totalMinor - (s.paidMinor ?? 0)) : 0;
+/** Sales that count as revenue: not returned, not voided. */
+export const saleCounts = (s: CompletedSale): boolean => s.status !== 'Returned' && s.status !== 'Voided';
 
 /**
  * Refund for a full return: each method gets back what it actually paid.
@@ -146,6 +179,14 @@ interface CartState {
   parked: ParkedSale[];
   orderSeq: number;
   orderDiscountBps: number;
+  /** Fixed-amount sale discount (used when orderDiscountBps is 0). */
+  orderDiscountMinor: number;
+  /** Tax removed from this sale (Sell screen → Tax → delete). */
+  taxRemoved: boolean;
+  /** Promo code entered on the sale (unlocks code-only promotions). */
+  promoCode: string;
+  /** Order number of the layaway / on-account sale being continued, if any. */
+  openSaleNumber: string | null;
   customerName: string;
   orderNote: string;
   lastSale: CompletedSale | null;
@@ -164,15 +205,29 @@ interface CartState {
   removeLine: (lineId: string) => void;
   clear: () => void;
   toggleDiscount: () => void;
+  /** Whole-sale discount as a percentage or a fixed amount (either may be 0). */
+  setOrderDiscount: (d: { bps?: number; amountMinor?: number }) => void;
+  setTaxRemoved: (removed: boolean) => void;
+  /** Apply a promo code; false when no active promotion carries it. */
+  setPromoCode: (code: string) => boolean;
+  updateLine: (lineId: string, patch: Partial<Pick<CartLine, 'quantity' | 'unitPriceMinor' | 'discountPct' | 'note' | 'soldBy'>>) => void;
+  /** Attribute every line of the sale to one staff member. */
+  assignAllLines: (soldBy: string) => void;
   setCustomer: (name: string) => void;
   setOrderNote: (note: string) => void;
 
-  park: () => void;
+  park: (note?: string) => void;
   retrieve: (id: string) => void;
   discardParked: (id: string) => void;
 
   completeSale: (sale: Omit<CompletedSale, 'orderNumber' | 'at'>) => CompletedSale;
   markReturned: (orderNumber: string) => void;
+  /** Cancel a sale without refunding: stock back, payments dropped from reports. */
+  voidSale: (orderNumber: string) => void;
+  /** Put an open layaway / on-account sale back on the register to take payment. */
+  continueSale: (orderNumber: string) => void;
+  /** Record payments (and any added lines) against the open sale being continued. */
+  payOpenSale: (orderNumber: string, tenders: Tender[], changeMinor: number, addedLines: SaleLine[], addedTotalMinor: number, toStatus: SaleStatus) => CompletedSale | null;
   dismissLastSale: () => void;
 }
 
@@ -189,6 +244,8 @@ const orderNumber = (seq: number): string => `#${1000 + seq}`;
 let hasRefundColumns = true;
 // Whether it has the tax / discount columns from migration 0008.
 let hasTaxColumns = true;
+// Whether it has the paid / voided columns from migration 0009.
+let hasPaidColumns = true;
 
 /** Parse the numeric part of an order label like "#1002" → 1002. */
 const orderNumToInt = (label: string): number => {
@@ -205,6 +262,7 @@ const saleToRow = (s: CompletedSale): Record<string, unknown> => ({
   change_minor: s.changeMinor,
   sold_at: new Date(s.at).toISOString(),
   ...(hasTaxColumns ? { tax_minor: s.taxMinor ?? 0, discount_minor: s.discountMinor ?? 0 } : {}),
+  ...(hasPaidColumns ? { paid_minor: s.paidMinor ?? null, voided_at: s.voidedAt ? new Date(s.voidedAt).toISOString() : null } : {}),
   training: s.training ?? false,
   customer_name: s.customer ?? null,
   note: s.note ?? null,
@@ -234,6 +292,8 @@ const rowToSale = (r: Record<string, unknown>): CompletedSale => ({
   status: r.status as CompletedSale['status'],
   refundTenders: (r.refund_tenders as Tender[] | null) ?? [],
   refundedAt: r.refunded_at ? new Date(r.refunded_at as string).getTime() : undefined,
+  paidMinor: (r.paid_minor as number | null) ?? undefined,
+  voidedAt: r.voided_at ? new Date(r.voided_at as string).getTime() : undefined,
 });
 
 // Map a ParkedSale to the parked_sales table row.
@@ -264,6 +324,10 @@ export const useCart = create<CartState>()(
   parked: [],
   orderSeq: 1,
   orderDiscountBps: 0,
+  orderDiscountMinor: 0,
+  taxRemoved: false,
+  promoCode: '',
+  openSaleNumber: null,
   customerName: '',
   orderNote: '',
   lastSale: null,
@@ -280,9 +344,11 @@ export const useCart = create<CartState>()(
     if (salesRows[0]) {
       hasRefundColumns = 'refund_tenders' in salesRows[0];
       hasTaxColumns = 'tax_minor' in salesRows[0];
+      hasPaidColumns = 'paid_minor' in salesRows[0];
     } else {
-      const probe = await dbSales.hasTaxColumns();
-      if (probe !== null) hasTaxColumns = probe;
+      const [taxProbe, paidProbe] = await Promise.all([dbSales.hasTaxColumns(), dbSales.hasPaidColumns()]);
+      if (taxProbe !== null) hasTaxColumns = taxProbe;
+      if (paidProbe !== null) hasPaidColumns = paidProbe;
     }
     // Advance the order counter past every number already in the cloud so a
     // fresh browser (empty localStorage) can never reissue an existing number.
@@ -308,7 +374,7 @@ export const useCart = create<CartState>()(
           ),
         };
       }
-      const priced = pricedFor(item, state.customerName);
+      const priced = pricedFor(item, state.customerName, state.promoCode);
       const line: CartLine = {
         lineId: uid(),
         variantId: item.id,
@@ -352,9 +418,38 @@ export const useCart = create<CartState>()(
   removeLine: (lineId) =>
     set((state) => ({ lines: state.lines.filter((l) => l.lineId !== lineId) })),
 
-  clear: () => set({ lines: [], orderDiscountBps: 0, customerName: '', orderNote: '' }),
+  clear: () => set({ lines: [], orderDiscountBps: 0, orderDiscountMinor: 0, taxRemoved: false, promoCode: '', openSaleNumber: null, customerName: '', orderNote: '' }),
 
-  toggleDiscount: () => set((state) => ({ orderDiscountBps: state.orderDiscountBps > 0 ? 0 : 1000 })),
+  toggleDiscount: () => set((state) => ({ orderDiscountBps: state.orderDiscountBps > 0 ? 0 : 1000, orderDiscountMinor: 0 })),
+
+  setOrderDiscount: (d) => set({ orderDiscountBps: Math.max(0, Math.min(10000, d.bps ?? 0)), orderDiscountMinor: Math.max(0, d.amountMinor ?? 0) }),
+
+  setTaxRemoved: (taxRemoved) => set({ taxRemoved }),
+
+  setPromoCode: (raw) => {
+    const code = raw.trim().toUpperCase();
+    if (code && !usePromotions.getState().promotions.some((p) => p.target === 'code' && p.promoCode.toUpperCase() === code && p.active)) return false;
+    set((state) => ({
+      promoCode: code,
+      lines: state.lines.map((l) => {
+        if (l.custom || l.locked) return l;
+        const product = useProducts.getState().products.find((p) => p.id === l.variantId);
+        if (!product) return l;
+        const priced = pricedFor(product, state.customerName, code);
+        return { ...l, unitPriceMinor: priced.unitPriceMinor, basePriceMinor: priced.priceNote ? priced.basePriceMinor : undefined, priceNote: priced.priceNote };
+      }),
+    }));
+    return true;
+  },
+
+  updateLine: (lineId, patch) =>
+    set((state) => ({
+      lines: state.lines
+        .map((l) => (l.lineId === lineId && !l.locked ? { ...l, ...patch } : l))
+        .filter((l) => l.quantity > 0),
+    })),
+
+  assignAllLines: (soldBy) => set((state) => ({ lines: state.lines.map((l) => ({ ...l, soldBy })) })),
 
   // Changing the customer can change the price book, so product lines are
   // re-priced (service lines keep their typed price).
@@ -362,10 +457,10 @@ export const useCart = create<CartState>()(
     set((state) => ({
       customerName,
       lines: state.lines.map((l) => {
-        if (l.custom) return l;
+        if (l.custom || l.locked) return l;
         const product = useProducts.getState().products.find((p) => p.id === l.variantId);
         if (!product) return l;
-        const priced = pricedFor(product, customerName);
+        const priced = pricedFor(product, customerName, state.promoCode);
         return {
           ...l,
           unitPriceMinor: priced.unitPriceMinor,
@@ -376,7 +471,7 @@ export const useCart = create<CartState>()(
     })),
   setOrderNote: (orderNote) => set({ orderNote }),
 
-  park: () =>
+  park: (note) =>
     set((state) => {
       if (state.lines.length === 0) return state;
       const parkedSale: ParkedSale = {
@@ -386,13 +481,17 @@ export const useCart = create<CartState>()(
         parkedAt: Date.now(),
         discountBps: state.orderDiscountBps,
         customerName: state.customerName,
-        note: state.orderNote,
+        note: note?.trim() || state.orderNote,
       };
       dbParked.insert(parkedToRow(parkedSale));
       return {
         parked: [parkedSale, ...state.parked],
         lines: [],
         orderDiscountBps: 0,
+        orderDiscountMinor: 0,
+        taxRemoved: false,
+        promoCode: '',
+        openSaleNumber: null,
         customerName: '',
         orderNote: '',
         orderSeq: state.orderSeq + 1,
@@ -444,7 +543,7 @@ export const useCart = create<CartState>()(
       customer: state.customerName || undefined,
       note: state.orderNote || undefined,
       soldBy,
-      status: 'Completed',
+      status: sale.status ?? 'Completed',
     };
 
     // Persist to Supabase.
@@ -453,6 +552,10 @@ export const useCart = create<CartState>()(
     set({
       lines: [],
       orderDiscountBps: 0,
+      orderDiscountMinor: 0,
+      taxRemoved: false,
+      promoCode: '',
+      openSaleNumber: null,
       customerName: '',
       orderNote: '',
       orderSeq: state.orderSeq + 1,
@@ -460,6 +563,98 @@ export const useCart = create<CartState>()(
       sales: [completed, ...state.sales],
     });
     return completed;
+  },
+
+  voidSale: (orderNo) => {
+    const state = get();
+    const sale = state.sales.find((s) => s.orderNumber === orderNo);
+    if (!sale || sale.status === 'Voided') return;
+    // Everything sold goes back into stock; a returned sale already did that.
+    if (!sale.training && sale.status !== 'Returned') {
+      const prodStore = useProducts.getState();
+      for (const line of sale.lines) {
+        const prod = line.variantId ? prodStore.products.find((p) => p.id === line.variantId) : prodStore.products.find((p) => p.name === line.name);
+        if (!prod) continue;
+        for (const s of stockLinesFor(prod, line.quantity)) prodStore.adjustStock(s.id, -s.delta);
+      }
+    }
+    const voidedAt = Date.now();
+    dbSales.update(orderNo, { status: 'Voided', ...(hasPaidColumns ? { voided_at: new Date(voidedAt).toISOString() } : {}) });
+    set({ sales: state.sales.map((s) => (s.orderNumber === orderNo ? { ...s, status: 'Voided' as const, voidedAt } : s)) });
+  },
+
+  continueSale: (orderNo) => {
+    const sale = get().sales.find((s) => s.orderNumber === orderNo);
+    if (!sale || (sale.status !== 'Layaway' && sale.status !== 'On account')) return;
+    set({
+      lines: sale.lines.map((l) => ({
+        lineId: uid(),
+        variantId: l.variantId ?? `custom-${uid()}`,
+        name: l.name,
+        unitPriceMinor: l.unitPriceMinor,
+        taxGroupId: 'standard',
+        quantity: l.quantity,
+        discountPct: l.discountPct,
+        note: l.note,
+        soldBy: l.soldBy,
+        locked: true,
+      })),
+      orderDiscountBps: 0,
+      orderDiscountMinor: sale.discountMinor ?? 0,
+      taxRemoved: false,
+      promoCode: '',
+      openSaleNumber: orderNo,
+      customerName: sale.customer ?? '',
+      orderNote: sale.note ?? '',
+    });
+  },
+
+  payOpenSale: (orderNo, tenders, changeMinor, addedLines, addedTotalMinor, toStatus) => {
+    const state = get();
+    const sale = state.sales.find((s) => s.orderNumber === orderNo);
+    if (!sale) return null;
+    // Newly added items leave stock now, like the original lines did.
+    if (!sale.training && addedLines.length) {
+      const prodStore = useProducts.getState();
+      for (const line of addedLines) {
+        const prod = prodStore.products.find((p) => p.id === line.variantId);
+        if (!prod) continue;
+        for (const s of stockLinesFor(prod, line.quantity)) prodStore.adjustStock(s.id, s.delta);
+      }
+    }
+    const paid = (sale.paidMinor ?? 0) + tenders.reduce((a, t) => a + t.amountMinor, 0) - changeMinor;
+    const totalMinor = sale.totalMinor + addedTotalMinor;
+    const status: SaleStatus = paid >= totalMinor ? 'Completed' : toStatus;
+    const updated: CompletedSale = {
+      ...sale,
+      lines: [...sale.lines, ...addedLines],
+      totalMinor,
+      tenders: [...sale.tenders, ...tenders],
+      changeMinor: sale.changeMinor + changeMinor,
+      paidMinor: status === 'Completed' ? undefined : paid,
+      status,
+    };
+    dbSales.update(orderNo, {
+      lines: updated.lines,
+      total_minor: updated.totalMinor,
+      tenders: updated.tenders,
+      change_minor: updated.changeMinor,
+      status: updated.status,
+      ...(hasPaidColumns ? { paid_minor: updated.paidMinor ?? null } : {}),
+    });
+    set({
+      lines: [],
+      orderDiscountBps: 0,
+      orderDiscountMinor: 0,
+      taxRemoved: false,
+      promoCode: '',
+      openSaleNumber: null,
+      customerName: '',
+      orderNote: '',
+      lastSale: updated,
+      sales: state.sales.map((s) => (s.orderNumber === orderNo ? updated : s)),
+    });
+    return updated;
   },
 
   markReturned: (orderNo) => {

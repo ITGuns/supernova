@@ -34,12 +34,14 @@ export function PaymentTypesSettings() {
   const [editName, setEditName] = useState('');
   const [editSub, setEditSub] = useState('');
   const [editIcon, setEditIcon] = useState<'cash' | 'card'>('card');
+  const [editAskRef, setEditAskRef] = useState(false);
 
   const openEdit = (t: PaymentType) => {
     setEditingId(t.id);
     setEditName(t.name);
     setEditSub(t.sub);
     setEditIcon(kindOf(t.icon));
+    setEditAskRef(!!t.askReference);
   };
 
   // A new type opens straight into its editor so it gets a real name
@@ -54,7 +56,7 @@ export function PaymentTypesSettings() {
     if (editingId === null) return;
     set({
       paymentTypes: types.map((t) =>
-        t.id === editingId ? { ...t, name: editName, sub: editSub, icon: editIcon } : t,
+        t.id === editingId ? { ...t, name: editName, sub: editSub, icon: editIcon, askReference: editAskRef } : t,
       ),
     });
     setEditingId(null);
@@ -193,6 +195,16 @@ export function PaymentTypesSettings() {
                 </div>
               </div>
 
+              <label className="pe-check" style={{ margin: '4px 0 10px' }}>
+                <input type="checkbox" checked={editAskRef} onChange={(e) => setEditAskRef(e.target.checked)} />
+                <span>
+                  Ask for a reference number
+                  <span style={{ display: 'block', fontSize: '12px', color: 'var(--muted)', fontWeight: 400 }}>
+                    When this payment type is used, the register asks for a reference (e.g. a check or transaction number) that prints on the receipt.
+                  </span>
+                </span>
+              </label>
+
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '12px', alignItems: 'center' }}>
                 <button
                   type="button"
@@ -200,7 +212,7 @@ export function PaymentTypesSettings() {
                   style={{
                     background: 'none',
                     border: 'none',
-                    color: '#e11d48',
+                    color: 'var(--bad)',
                     cursor: 'pointer',
                     fontWeight: 600,
                     fontSize: '14px',

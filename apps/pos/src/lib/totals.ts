@@ -18,26 +18,42 @@ export interface CartTotals {
   pricedLines: readonly PricedLine[];
 }
 
+/** A whole-sale discount: a percentage (basis points) or a fixed amount. */
+export interface OrderDiscount {
+  bps?: number;
+  amountMinor?: number;
+}
+
 export function computeTotals(
   lines: CartLine[],
-  discountBps = 0,
+  // A plain number is a percentage in basis points (legacy callers).
+  discount: number | OrderDiscount = 0,
   currency = 'USD',
   // Store-wide default sales tax rate (basis points). When provided it overrides
   // each product's tax group — this is what the "Default sales tax" setting drives.
   taxRateBpsOverride?: number,
+  opts: { removeTax?: boolean } = {},
 ): CartTotals {
-  const discounts: AppliedDiscountInput[] =
-    discountBps > 0
-      ? [
-          {
-            id: 'order-disc',
-            name: `Discount ${discountBps / 100}%`,
-            scope: 'ORDER',
-            method: 'PERCENT',
-            value: discountBps,
-          },
-        ]
-      : [];
+  const order: OrderDiscount = typeof discount === 'number' ? { bps: discount } : discount;
+  const discounts: AppliedDiscountInput[] = [];
+  // Line discounts first (a percentage typed on the line itself).
+  for (const l of lines) {
+    if ((l.discountPct ?? 0) > 0) {
+      discounts.push({
+        id: `line-disc-${l.lineId}`,
+        name: `${l.discountPct}% off`,
+        scope: 'LINE',
+        method: 'PERCENT',
+        value: Math.round((l.discountPct ?? 0) * 100),
+        lineId: l.lineId,
+      });
+    }
+  }
+  if ((order.bps ?? 0) > 0) {
+    discounts.push({ id: 'order-disc', name: `Discount ${(order.bps ?? 0) / 100}%`, scope: 'ORDER', method: 'PERCENT', value: order.bps ?? 0 });
+  } else if ((order.amountMinor ?? 0) > 0) {
+    discounts.push({ id: 'order-disc', name: 'Discount', scope: 'ORDER', method: 'FIXED_AMOUNT', value: order.amountMinor ?? 0 });
+  }
 
   const priced = priceCart({
     channel: 'RETAIL',
@@ -53,6 +69,7 @@ export function computeTotals(
   });
 
   const tax = computeTax(priced.lines, (line): ResolvedTaxRate[] => {
+    if (opts.removeTax) return [];
     // Store-wide default tax setting wins when provided; otherwise fall back to
     // the product's own tax group.
     let rateBasisPoints: number;

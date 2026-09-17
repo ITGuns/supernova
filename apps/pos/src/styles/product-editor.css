@@ -215,3 +215,12 @@
 /* Promotion: category checklist */
 .pe-checklist { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0 20px; }
 .pe-checklist .pe-check { margin: 4px 0; }
+
+/* Promotion editor extras */
+.pe-promo-preview { border: 1px solid var(--line); border-radius: 10px; padding: 16px; background: var(--panel); display: flex; flex-direction: column; gap: 6px; }
+.pe-promo-preview b { font-size: 15px; color: var(--text); }
+.pe-promo-preview span { font-size: 13px; color: var(--muted); }
+.pe-recurring { margin: 6px 0 10px; }
+.pe-days { display: flex; gap: 6px; margin: 6px 0 10px; flex-wrap: wrap; }
+.pe-day { border: 1px solid var(--line); background: var(--panel); color: var(--muted); border-radius: 6px; padding: 6px 10px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.pe-day.active { background: var(--primary); border-color: var(--primary); color: #fff; }

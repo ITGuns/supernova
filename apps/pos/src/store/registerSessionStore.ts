@@ -6,9 +6,19 @@ import { dbRegisterSession } from '../lib/db';
 // movements, and the closure history.
 export type CashMovementType = 'ADD' | 'REMOVE';
 
+/** Lightspeed's four movement kinds: cash in / out, and petty cash in / out. */
+export type CashMovementKind = 'cash_in' | 'petty_cash_in' | 'cash_out' | 'petty_cash_out';
+export const MOVEMENT_LABEL: Record<CashMovementKind, string> = {
+  cash_in: 'Cash in',
+  petty_cash_in: 'Petty cash in',
+  cash_out: 'Cash out',
+  petty_cash_out: 'Petty cash out',
+};
+
 export interface CashMovement {
   id: string;
   type: CashMovementType;
+  kind?: CashMovementKind;
   amountMinor: number;
   note: string;
   by: string;
@@ -40,7 +50,9 @@ interface RegisterSessionState {
 
   /** Pull session state from Supabase. */
   syncFromDb: () => Promise<void>;
-  openRegister: (floatMinor: number) => void;
+  openRegister: (floatMinor: number, note?: string) => void;
+  /** Set the opening float on an already-open register (Cash management → Set float). */
+  setOpeningFloat: (floatMinor: number) => void;
   addMovement: (m: Omit<CashMovement, 'id' | 'at'>) => void;
   closeRegister: (data: {
     countedMinor: number;
@@ -78,6 +90,11 @@ export const useRegisterSession = create<RegisterSessionState>()(
           movements: (row.movements as CashMovement[]) ?? [],
           closures: (row.closures as RegisterClosure[]) ?? [],
         });
+      },
+
+      setOpeningFloat: (floatMinor) => {
+        set({ openingFloatMinor: floatMinor });
+        dbRegisterSession.save({ opening_float_minor: floatMinor });
       },
 
       openRegister: (floatMinor) => {

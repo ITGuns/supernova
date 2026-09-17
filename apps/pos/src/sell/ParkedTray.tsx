@@ -20,13 +20,14 @@ export function ParkedTray({ onClose }: { onClose: () => void }) {
         </div>
         {parked.length === 0 && <div className="drawer-empty">No parked sales.</div>}
         {parked.map((p) => {
-          const t = computeTotals(p.lines, 0, 'USD', taxBps);
+          const t = computeTotals(p.lines, p.discountBps, 'USD', taxBps);
           return (
             <div key={p.id} className="parked-item">
               <div>
-                <div className="parked-label">Sale {p.label}</div>
+                <div className="parked-label">Sale {p.label}{p.customerName ? ` · ${p.customerName}` : ''}</div>
                 <div className="parked-meta">
-                  {t.itemCount} item{t.itemCount === 1 ? '' : 's'} · {fmt(t.totalMinor)}
+                  {t.itemCount} item{t.itemCount === 1 ? '' : 's'} · {fmt(t.totalMinor)} · {new Date(p.parkedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                  {p.note ? ` · ${p.note}` : ''}
                 </div>
               </div>
               <div className="parked-actions">

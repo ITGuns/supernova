@@ -185,6 +185,8 @@ export const dbCustomers = {
   },
   addGroup: (name: string) => insert('customer_groups', { name }),
   delGroup: (name: string) => delBy('customer_groups', 'name', name),
+  /** Whether customers have the on-account limit / loyalty columns (migration 0009). */
+  hasLimitColumns: () => hasColumn('customers', 'on_account_limit_minor'),
 };
 
 // ─── Sales ───────────────────────────────────────────────────────────────────
@@ -206,6 +208,8 @@ export const dbSales = {
     write({ table: 'sales', kind: 'update', payload: patch, match: { col: 'order_number', val: orderNumber }, scope: 'sales.update' }),
   /** Whether the table has the tax / discount columns (migration 0008). */
   hasTaxColumns: () => hasColumn('sales', 'tax_minor'),
+  /** Whether the table has the paid / voided columns (migration 0009). */
+  hasPaidColumns: () => hasColumn('sales', 'paid_minor'),
 };
 
 // ─── Parked Sales ─────────────────────────────────────────────────────────────
@@ -244,6 +248,8 @@ export const dbQuotes = {
   del: (id: string) => delBy('quotes', 'id', id),
   /** Whether the table keeps quote lines (migration 0008). */
   hasLines: () => hasColumn('quotes', 'lines'),
+  /** Whether the table keeps a quote note (migration 0009). */
+  hasNote: () => hasColumn('quotes', 'note'),
 };
 
 // ─── Stock Transactions ───────────────────────────────────────────────────────
@@ -365,6 +371,8 @@ export const dbPromotions = {
   list: () => listOrMissing('promotions', 'created_at'),
   upsert: (row: Row) => upsert('promotions', row),
   del: (id: string) => delBy('promotions', 'id', id),
+  /** Whether the table has the targeting / schedule columns (migration 0009). */
+  hasTargeting: () => hasColumn('promotions', 'target'),
 };
 export const dbPriceBooks = {
   list: () => listOrMissing('price_books', 'created_at'),
@@ -375,6 +383,38 @@ export const dbFulfillments = {
   list: () => listOrMissing('fulfillments', 'created_at'),
   upsert: (row: Row) => upsert('fulfillments', row),
   del: (id: string) => delBy('fulfillments', 'id', id),
+};
+
+// ─── Lightspeed-parity tables (migration 0009) ───────────────────────────────
+export const dbInventoryAdjustments = {
+  list: () => listOrMissing('inventory_adjustments', 'created_at'),
+  upsert: (row: Row) => upsert('inventory_adjustments', row),
+  del: (id: string) => delBy('inventory_adjustments', 'id', id),
+};
+export const dbServices = {
+  list: () => listOrMissing('services', 'created_at'),
+  upsert: (row: Row) => upsert('services', row),
+  del: (id: string) => delBy('services', 'id', id),
+};
+export const dbServiceStatuses = {
+  list: () => listOrMissing('service_statuses', 'position'),
+  upsert: (row: Row) => upsert('service_statuses', row),
+  del: (id: string) => delBy('service_statuses', 'id', id),
+};
+export const dbTimeEntries = {
+  list: () => listOrMissing('time_entries', 'clock_in'),
+  upsert: (row: Row) => upsert('time_entries', row),
+  del: (id: string) => delBy('time_entries', 'id', id),
+};
+export const dbSerialNumbers = {
+  list: () => listOrMissing('serial_numbers', 'created_at'),
+  upsert: (row: Row) => upsert('serial_numbers', row),
+  del: (id: string) => delBy('serial_numbers', 'id', id),
+};
+export const dbCustomFields = {
+  list: () => listOrMissing('custom_fields', 'created_at'),
+  upsert: (row: Row) => upsert('custom_fields', row),
+  del: (id: string) => delBy('custom_fields', 'id', id),
 };
 
 // ─── Product tags ────────────────────────────────────────────────────────────

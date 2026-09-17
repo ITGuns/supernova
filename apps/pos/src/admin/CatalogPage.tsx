@@ -5,6 +5,7 @@ import { ContextNav, type ContextItem } from '../shell/ContextNav';
 import { useAdjustmentReasons, type AdjustmentType } from '../store/adjustmentReasonsStore';
 import { DEFAULT_CATEGORY_ID, categoryDescendantIds, categoryLabel, sortedCategories, useCatalogMeta } from '../store/catalogMetaStore';
 import { tagKey, useProductTags } from '../store/tagStore';
+import { useSetup } from '../store/setupStore';
 import { promoLabel, promotionStatus, usePromotions } from '../store/promotionStore';
 import { priceBookActive, usePriceBooks } from '../store/priceBookStore';
 import { availableOf, useProducts, type Product } from '../store/productStore';
@@ -133,7 +134,27 @@ export function CatalogPage() {
   const [reasonModal, setReasonModal] = useState<{ id: string; name: string; type: AdjustmentType; enabled: boolean } | null>(null);
 
   const promotions = usePromotions((s) => s.promotions);
+  const updatePromotion = usePromotions((s) => s.updatePromotion);
+  const deletePromotion = usePromotions((s) => s.deletePromotion);
   const priceBooks = usePriceBooks((s) => s.priceBooks);
+  const outlets = useSetup((s) => s.outlets);
+  const [promoTab, setPromoTab] = useState<'Current and upcoming' | 'Past' | 'All'>('Current and upcoming');
+  const [promoQ, setPromoQ] = useState('');
+  const [promoDate, setPromoDate] = useState('');
+  const [promoOutlet, setPromoOutlet] = useState('all');
+  const [promoExpanded, setPromoExpanded] = useState<string | null>(null);
+  const visiblePromotions = promotions.filter((p) => {
+    const status = promotionStatus(p);
+    if (promoTab === 'Current and upcoming' && (status === 'Expired')) return false;
+    if (promoTab === 'Past' && status !== 'Expired') return false;
+    if (promoQ.trim() && !p.name.toLowerCase().includes(promoQ.trim().toLowerCase())) return false;
+    if (promoOutlet !== 'all' && p.outlets.length && !p.outlets.includes(promoOutlet)) return false;
+    if (promoDate) {
+      const t = new Date(`${promoDate}T12:00:00`).getTime();
+      if ((p.startAt !== null && p.startAt > t + 86400000) || (p.endAt !== null && p.endAt < t)) return false;
+    }
+    return true;
+  });
 
   // Product tags — persisted; every tag a product carries has a row of its own too
   const tags = useProductTags((s) => s.tags);
@@ -722,33 +743,77 @@ export function CatalogPage() {
           ) : active === 'promotions' ? (
             <>
               <h1 className="page-title">Promotions</h1>
+              <div className="sh-tabs">
+                {(['Current and upcoming', 'Past', 'All'] as const).map((t) => (
+                  <button key={t} className={`sh-tab ${promoTab === t ? 'active' : ''}`} onClick={() => setPromoTab(t)}>{t}</button>
+                ))}
+              </div>
               <div className="cat-band">
                 <span>
-                  Run automatic discounts on products, categories or the whole store. <span className="rlink">Need help?</span>
+                  Create and manage current and upcoming promotions. <span className="rlink">Need help?</span>
                 </span>
                 <button className="btn-p" onClick={() => navigate('/catalog/promotions/new')}>
                   Add promotion
                 </button>
               </div>
+              <div className="sc-filter-card">
+                <div className="sc-frow">
+                  <div className="f-field">
+                    <label>Search for promotions</label>
+                    <input value={promoQ} onChange={(e) => setPromoQ(e.target.value)} placeholder="Promotion name" />
+                  </div>
+                  <div className="f-field">
+                    <label>Date</label>
+                    <input type="date" value={promoDate} onChange={(e) => setPromoDate(e.target.value)} />
+                  </div>
+                  <div className="f-field">
+                    <label>Outlet</label>
+                    <select className="set-select" value={promoOutlet} onChange={(e) => setPromoOutlet(e.target.value)} style={{ height: '38px', background: 'var(--panel)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: '8px', padding: '0 8px' }}>
+                      <option value="all">All outlets</option>
+                      {outlets.map((o) => <option key={o.id} value={o.name}>{o.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div className="inv-count">Displaying {visiblePromotions.length} promotion{visiblePromotions.length === 1 ? '' : 's'}</div>
               <div className="ctable">
                 <div className="cthead promo5">
                   <span>Name</span>
                   <span>Discount</span>
-                  <span>Applies to</span>
-                  <span>Dates</span>
+                  <span>End date</span>
+                  <span>Recurring</span>
                   <span>Status</span>
                 </div>
-                {promotions.length === 0 && <div className="ct-empty">No promotions yet. Add one to discount products automatically at the register.</div>}
-                {promotions.map((p) => {
+                {visiblePromotions.length === 0 && <div className="ct-empty">{promoTab === 'Past' ? 'Past promotions will be displayed here.' : 'Current and future promotions will be displayed here.'}</div>}
+                {visiblePromotions.map((p) => {
                   const status = promotionStatus(p);
-                  const dates = p.startAt || p.endAt ? `${p.startAt ? new Date(p.startAt).toLocaleDateString() : 'Now'} – ${p.endAt ? new Date(p.endAt).toLocaleDateString() : 'no end'}` : 'Always';
                   return (
-                    <div key={p.id} className="ctrow promo5">
-                      <span className="rlink" onClick={() => navigate(`/catalog/promotions/${p.id}`)}>{p.name}</span>
-                      <span>{promoLabel(p)}</span>
-                      <span>{p.appliesTo === 'all' ? 'All products' : p.appliesTo === 'categories' ? `${p.targetIds.length} categor${p.targetIds.length === 1 ? 'y' : 'ies'}` : `${p.targetIds.length} product${p.targetIds.length === 1 ? '' : 's'}`}</span>
-                      <span className="ct-muted">{dates}</span>
-                      <span><span className={`tx-badge ${status === 'Active' ? 'received' : status === 'Scheduled' ? 'open' : status === 'Expired' ? 'cancelled' : ''}`}>{status}</span></span>
+                    <div key={p.id}>
+                      <div className="ctrow promo5" onClick={() => setPromoExpanded((e) => (e === p.id ? null : p.id))} style={{ cursor: 'pointer' }}>
+                        <span className="rlink">{p.name}</span>
+                        <span>{promoLabel(p)}{p.appliesTo === 'all' ? '' : p.appliesTo === 'categories' ? ` · ${p.targetIds.length} categor${p.targetIds.length === 1 ? 'y' : 'ies'}` : ` · ${p.targetIds.length} product${p.targetIds.length === 1 ? '' : 's'}`}</span>
+                        <span className="ct-muted">{p.endAt ? new Date(p.endAt).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'No end date'}</span>
+                        <span>{p.schedule.kind === 'recurring' ? 'Yes' : 'No'}</span>
+                        <span><span className={`tx-badge ${status === 'Active' ? 'received' : status === 'Scheduled' ? 'open' : status === 'Expired' ? 'cancelled' : ''}`}>{status}</span></span>
+                      </div>
+                      {promoExpanded === p.id && (
+                        <div className="ct-expand">
+                          <div className="ct-expand-info">
+                            {p.description && <div>{p.description}</div>}
+                            <div className="ct-muted">
+                              {p.target === 'everyone' ? 'Available to everyone' : p.target === 'group' ? `Exclusive to ${p.customerGroups.join(', ') || 'customer groups'}` : `Promo code ${p.promoCode}`}
+                              {' · '}{p.outlets.length ? p.outlets.join(', ') : 'All outlets'}
+                              {' · '}{p.startAt ? `From ${new Date(p.startAt).toLocaleDateString()}` : 'Started'}
+                            </div>
+                          </div>
+                          <div className="ct-expand-actions">
+                            <button className="btn-s" onClick={() => navigate(`/catalog/promotions/${p.id}`)}>Edit</button>
+                            <button className="btn-s" onClick={() => { setSelectedCategory('all'); setQ(''); setActive('products'); }}>View products</button>
+                            {status === 'Active' && <button className="btn-s" onClick={() => updatePromotion(p.id, { endAt: Date.now() })}>End early</button>}
+                            <button className="btn-s danger" onClick={() => deletePromotion(p.id)}>Delete</button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}

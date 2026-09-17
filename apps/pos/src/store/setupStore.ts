@@ -10,6 +10,8 @@ export interface PaymentType {
   name: string;
   sub: string;
   icon: string;
+  /** Prompt for a reference number (e.g. a check number) when taking this payment. */
+  askReference?: boolean;
 }
 
 export interface Outlet {
