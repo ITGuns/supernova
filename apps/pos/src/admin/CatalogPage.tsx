@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { downloadCsv } from '../lib/csv';
 import { fmt } from '../lib/format';
+import { useInventory } from '../store/inventoryStore';
+import { ProductRowPanel } from './ProductRowPanel';
 import { ContextNav, type ContextItem } from '../shell/ContextNav';
 import { useAdjustmentReasons, type AdjustmentType } from '../store/adjustmentReasonsStore';
 import { DEFAULT_CATEGORY_ID, categoryDescendantIds, categoryLabel, sortedCategories, useCatalogMeta } from '../store/catalogMetaStore';
@@ -30,57 +33,6 @@ const ENTITY_KIND: Record<'category' | 'brand' | 'supplier', 'categories' | 'bra
   brand: 'brands',
   supplier: 'suppliers',
 };
-
-/** Minimal CSV parser: handles quoted fields, escaped quotes and CR/LF rows. */
-function parseCsv(text: string): string[][] {
-  const out: string[][] = [];
-  let row: string[] = [];
-  let field = '';
-  let inQ = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inQ) {
-      if (ch === '"') {
-        if (text[i + 1] === '"') {
-          field += '"';
-          i++;
-        } else {
-          inQ = false;
-        }
-      } else {
-        field += ch;
-      }
-    } else if (ch === '"') {
-      inQ = true;
-    } else if (ch === ',') {
-      row.push(field);
-      field = '';
-    } else if (ch === '\n' || ch === '\r') {
-      if (ch === '\r' && text[i + 1] === '\n') i++;
-      row.push(field);
-      field = '';
-      if (row.some((c) => c.trim() !== '')) out.push(row);
-      row = [];
-    } else {
-      field += ch;
-    }
-  }
-  row.push(field);
-  if (row.some((c) => c.trim() !== '')) out.push(row);
-  return out;
-}
-
-/** Build a CSV string and trigger a browser download. */
-function downloadCsv(filename: string, rows: string[][]) {
-  const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-  const csv = rows.map((r) => r.map(esc).join(',')).join('\n');
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 function SortIcon({ dir }: { dir: 'asc' | 'desc' }) {
   return (
@@ -197,12 +149,33 @@ export function CatalogPage() {
   const [supAsc, setSupAsc] = useState(true);
 
   // Import Modal state
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [importStatus, setImportStatus] = useState<'idle' | 'importing' | 'done'>('idle');
-  const [importedCount, setImportedCount] = useState(0);
-  const importFileRef = useRef<HTMLInputElement>(null);
+  const transactions = useInventory((s) => s.transactions);
+  const [poQ, setPoQ] = useState('');
+  // Lightspeed applies the product filters when you press Search (or Enter);
+  // `pending` holds what's typed, the individual states hold what's applied.
+  const [pending, setPending] = useState({ q: initialQ, tagQ: '', category: 'all', brand: 'all', supplier: 'all', status: 'all' as 'all' | 'active' | 'inactive', po: '' });
 
   const label = NAV.find((n) => n.key === active)?.label ?? 'Catalog';
+  useEffect(() => {
+    setPending({ q, tagQ, category: selectedCategory, brand: selectedBrand, supplier: selectedSupplier, status: selectedStatus, po: poQ });
+  }, [q, tagQ, selectedCategory, selectedBrand, selectedSupplier, selectedStatus, poQ]);
+  const applyFilters = () => {
+    setQ(pending.q);
+    setTagQ(pending.tagQ);
+    setSelectedCategory(pending.category);
+    setSelectedBrand(pending.brand);
+    setSelectedSupplier(pending.supplier);
+    setSelectedStatus(pending.status);
+    setPoQ(pending.po);
+  };
+  // Products that appear on a purchase order whose number matches.
+  const poProductIds = useMemo(() => {
+    const needle = poQ.trim().toLowerCase();
+    if (!needle) return null;
+    const ids = new Set<string>();
+    transactions.filter((t) => t.kind === 'order' && t.number.toLowerCase().includes(needle)).forEach((t) => t.lines.forEach((l) => ids.add(l.productId)));
+    return ids;
+  }, [poQ, transactions]);
 
   // "Tags" filter: comma-separated tag names the product must all carry.
   const tagTokens = tagQ.split(',').map((t) => tagKey(t)).filter(Boolean);
@@ -218,7 +191,8 @@ export function CatalogPage() {
       (categoryIds === null || categoryIds.has(p.categoryId)) &&
       (selectedBrand === 'all' || p.brand === selectedBrand) &&
       (selectedSupplier === 'all' || p.supplier === selectedSupplier) &&
-      (selectedStatus === 'all' || (selectedStatus === 'active') === p.enabled)
+      (selectedStatus === 'all' || (selectedStatus === 'active') === p.enabled) &&
+      (poProductIds === null || poProductIds.has(p.id))
     );
   });
 
@@ -343,59 +317,18 @@ export function CatalogPage() {
     ]);
   };
 
-  const triggerImport = () => {
-    setShowImportModal(true);
-    setImportStatus('idle');
-    setImportedCount(0);
-  };
+  const triggerImport = () => navigate('/catalog/products/import');
 
-  const handleImportFile = (file: File | undefined) => {
-    if (!file) return;
-    setImportStatus('importing');
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = typeof reader.result === 'string' ? reader.result : '';
-      const parsed = parseCsv(text);
-      let count = 0;
-      if (parsed.length > 1) {
-        const header = (parsed[0] ?? []).map((h) => h.trim().toLowerCase());
-        const col = (...names: string[]) => header.findIndex((h) => names.includes(h));
-        const iName = col('name', 'product', 'product name', 'title');
-        const iPrice = col('price', 'retail price', 'retail_price');
-        const iSku = col('sku', 'sku code', 'code');
-        const iCat = col('category', 'product category');
-        parsed.slice(1).forEach((r, idx) => {
-          const name = iName >= 0 ? (r[iName] ?? '').trim() : '';
-          const price = iPrice >= 0 ? parseFloat((r[iPrice] ?? '').replace(/[^0-9.-]/g, '')) : NaN;
-          if (!name || !Number.isFinite(price) || price < 0) return; // skip invalid rows
-          const rawCat = iCat >= 0 ? (r[iCat] ?? '').trim() : '';
-          const matchedCat = categories.find(
-            (c) => c.name.toLowerCase() === rawCat.toLowerCase() || c.id === rawCat,
-          );
-          const id = `p-imp-${Date.now()}-${idx}`;
-          addP({
-            id,
-            productId: id,
-            name,
-            sku: (iSku >= 0 && (r[iSku] ?? '').trim()) || `IMP-${1000 + idx}`,
-            emoji: '📦',
-            categoryId: matchedCat?.id ?? categories[0]?.id ?? DEFAULT_CATEGORY_ID,
-            priceMinor: Math.round(price * 100),
-            taxGroupId: 'standard',
-            enabled: true,
-            created: 'Imported today',
-            variants: 0,
-            available: 0,
-            brand: brands[0]?.name ?? 'Nova',
-            supplier: suppliers[0]?.name ?? 'House',
-          });
-          count++;
-        });
-      }
-      setImportedCount(count);
-      setImportStatus('done');
-    };
-    reader.readAsText(file);
+  // Copy a product (or a whole variant family) with a new SKU, like Lightspeed's Duplicate.
+  const duplicateProduct = (members: Product[]) => {
+    const familyId = `p-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+    const today = new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    members.forEach((m, i) => {
+      const id = members.length > 1 ? `${familyId}-${i + 1}` : familyId;
+      const idx = m.name.lastIndexOf(' / ');
+      const name = members.length > 1 && idx > 0 ? `${m.name.slice(0, idx)} (copy)${m.name.slice(idx)}` : `${m.name} (copy)`;
+      addP({ ...m, id, productId: members.length > 1 ? familyId : id, name, sku: `${m.sku}-COPY`, created: today, available: 0, image: m.image, skuCodes: [] });
+    });
   };
 
   return (
@@ -405,24 +338,28 @@ export function CatalogPage() {
         <div className="admin-page">
           {active === 'brands' ? (
             <>
-              <div className="page-head">
-                <h1 className="page-title">Brands</h1>
+              <h1 className="page-title">Brands</h1>
+              <div className="cat-band">
+                <span>
+                  A list of all of your brands. <span className="rlink">Need help?</span>
+                </span>
                 <button
                   className="btn-p"
-                  onClick={() => setEditingEntity({ type: 'brand', id: '', name: '', isNew: true })}
+                  onClick={() => setEditingEntity({ type: 'brand', id: '', name: '', desc: '', isNew: true })}
                 >
                   Add brand
                 </button>
               </div>
-              <div className="page-subbar">A list of all of your brands.</div>
               <div className="atable">
-                <div className="athead brand">
+                <div className="athead brand brand4">
                   <span>Name</span>
+                  <span>Description</span>
                   <span className="r">Number of products</span>
                   <span />
                 </div>
+                {brands.length === 0 && <div className="ct-empty">You haven’t added any brands yet.</div>}
                 {brands.map((b) => (
-                  <div key={b.id} className="arow brand">
+                  <div key={b.id} className="arow brand brand4">
                     <span
                       className="rlink"
                       onClick={() => {
@@ -433,6 +370,7 @@ export function CatalogPage() {
                     >
                       {b.name}
                     </span>
+                    <span className="ct-muted">{b.description || '—'}</span>
                     <span className="r">{products.filter((p) => p.brand === b.name).length}</span>
                     <span className="row-actions">
                       <span
@@ -448,7 +386,7 @@ export function CatalogPage() {
                         className="ic"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setEditingEntity({ type: 'brand', id: b.id, name: b.name });
+                          setEditingEntity({ type: 'brand', id: b.id, name: b.name, desc: b.description ?? '' });
                         }}
                       >
                         ✎
@@ -824,31 +762,40 @@ export function CatalogPage() {
               <h1 className="page-title">Price books</h1>
               <div className="cat-band">
                 <span>
-                  Set special prices for customer groups or outlets. <span className="rlink">Need help?</span>
+                  A list of all of your price books. <span className="rlink">Need help?</span>
                 </span>
                 <button className="btn-p" onClick={() => navigate('/catalog/price-books/new')}>
                   Add price book
                 </button>
               </div>
               <div className="ctable">
-                <div className="cthead promo5">
+                <div className="cthead pb6">
                   <span>Name</span>
-                  <span>Customer group</span>
-                  <span>Outlet</span>
-                  <span>Valid</span>
-                  <span>Products</span>
+                  <span>Customer groups</span>
+                  <span>Channel</span>
+                  <span>Valid from</span>
+                  <span>Valid to</span>
+                  <span>Created</span>
                 </div>
-                {priceBooks.length === 0 && <div className="ct-empty">No price books yet. Every product sells at its retail price.</div>}
+                <div className="ctrow pb6">
+                  <span className="rlink" onClick={() => setActive('products')}>General Price Book (All Products)</span>
+                  <span>All Customers</span>
+                  <span>In-store &amp; Online</span>
+                  <span className="ct-muted">—</span>
+                  <span className="ct-muted">—</span>
+                  <span className="ct-muted">With store</span>
+                </div>
                 {priceBooks.map((b) => (
-                  <div key={b.id} className="ctrow promo5">
-                    <span className="rlink" onClick={() => navigate(`/catalog/price-books/${b.id}`)}>{b.name}</span>
-                    <span>{b.customerGroup}</span>
-                    <span>{b.outlet || 'All outlets'}</span>
-                    <span className="ct-muted">
-                      {b.startAt || b.endAt ? `${b.startAt ? new Date(b.startAt).toLocaleDateString() : 'Now'} – ${b.endAt ? new Date(b.endAt).toLocaleDateString() : 'no end'}` : 'Always'}
+                  <div key={b.id} className="ctrow pb6">
+                    <span className="rlink" onClick={() => navigate(`/catalog/price-books/${b.id}`)}>
+                      {b.name}
                       {!priceBookActive(b) && <span className="tx-badge cancelled"> Not active</span>}
                     </span>
-                    <span>{b.entries.length}</span>
+                    <span>{b.customerGroup}</span>
+                    <span>{b.outlet ? b.outlet : 'In-store & Online'}</span>
+                    <span className="ct-muted">{b.startAt ? new Date(b.startAt).toLocaleDateString() : '—'}</span>
+                    <span className="ct-muted">{b.endAt ? new Date(b.endAt).toLocaleDateString() : '—'}</span>
+                    <span className="ct-muted">{new Date(b.createdAt).toLocaleDateString()}</span>
                   </div>
                 ))}
               </div>
@@ -918,14 +865,14 @@ export function CatalogPage() {
                 <div className="sc-frow">
                   <div className="f-field">
                     <label>Search for products</label>
-                    <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search" />
+                    <input value={pending.q} onChange={(e) => setPending({ ...pending, q: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && applyFilters()} placeholder="Enter name, SKU, handle or supplier code" />
                   </div>
                   <div className="f-field">
                     <label>Product category</label>
                     <select
                       className="set-select"
-                      value={selectedCategory}
-                      onChange={(e) => setSelectedCategory(e.target.value)}
+                      value={pending.category}
+                      onChange={(e) => setPending({ ...pending, category: e.target.value })}
                       style={{ height: '40px', background: 'var(--panel)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: '6px', padding: '0 8px' }}
                     >
                       <option value="all">All categories</option>
@@ -936,7 +883,7 @@ export function CatalogPage() {
                   </div>
                   <div className="f-field">
                     <label>Tags</label>
-                    <input value={tagQ} onChange={(e) => setTagQ(e.target.value)} placeholder="Enter tags" />
+                    <input value={pending.tagQ} onChange={(e) => setPending({ ...pending, tagQ: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && applyFilters()} placeholder="Enter tags" />
                   </div>
                 </div>
                 <div className="sc-frow">
@@ -944,8 +891,8 @@ export function CatalogPage() {
                     <label>Supplier</label>
                     <select
                       className="set-select"
-                      value={selectedSupplier}
-                      onChange={(e) => setSelectedSupplier(e.target.value)}
+                      value={pending.supplier}
+                      onChange={(e) => setPending({ ...pending, supplier: e.target.value })}
                       style={{ height: '40px', background: 'var(--panel)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: '6px', padding: '0 8px' }}
                     >
                       <option value="all">All suppliers</option>
@@ -958,8 +905,8 @@ export function CatalogPage() {
                     <label>Brand</label>
                     <select
                       className="set-select"
-                      value={selectedBrand}
-                      onChange={(e) => setSelectedBrand(e.target.value)}
+                      value={pending.brand}
+                      onChange={(e) => setPending({ ...pending, brand: e.target.value })}
                       style={{ height: '40px', background: 'var(--panel)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: '6px', padding: '0 8px' }}
                     >
                       <option value="all">All brands</option>
@@ -969,20 +916,26 @@ export function CatalogPage() {
                     </select>
                   </div>
                   <div className="f-field">
+                    <label>Purchase order number</label>
+                    <input value={pending.po} onChange={(e) => setPending({ ...pending, po: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && applyFilters()} placeholder="Enter purchase order number" />
+                  </div>
+                </div>
+                <div className="sc-frow">
+                  <div className="f-field">
                     <label>Status</label>
                     <select
                       className="set-select"
-                      value={selectedStatus}
-                      onChange={(e) => setSelectedStatus(e.target.value as 'all' | 'active' | 'inactive')}
+                      value={pending.status}
+                      onChange={(e) => setPending({ ...pending, status: e.target.value as 'all' | 'active' | 'inactive' })}
                       style={{ height: '40px', background: 'var(--panel)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: '6px', padding: '0 8px' }}
                     >
-                      <option value="all">All</option>
+                      <option value="all">All statuses</option>
                       <option value="active">Active</option>
                       <option value="inactive">Inactive</option>
                     </select>
                   </div>
                 </div>
-                <div className="sc-factions">
+                <div className="sc-factions split">
                   <span
                     className="rlink"
                     onClick={() => {
@@ -992,16 +945,18 @@ export function CatalogPage() {
                       setSelectedBrand('all');
                       setSelectedSupplier('all');
                       setSelectedStatus('all');
+                      setPoQ('');
                     }}
                   >
                     Clear filters
                   </span>
+                  <button className="btn-p" onClick={applyFilters}>Search</button>
                 </div>
               </div>
 
               <div className="disp-row">
                 <span>
-                  Displaying {rows.length} product{rows.length === 1 ? '' : 's'}
+                  Displaying {rows.length} {selectedStatus === 'active' ? 'active ' : selectedStatus === 'inactive' ? 'inactive ' : ''}product{rows.length === 1 ? '' : 's'}
                   {q.trim() && ` containing “${q}”`}
                 </span>
                 <span className="rlink" onClick={exportProducts}>⤓ Export list…</span>
@@ -1025,7 +980,7 @@ export function CatalogPage() {
               )}
 
               <div className="atable">
-                <div className="athead prod2">
+                <div className="athead prod2 prod3">
                   <span className="c">
                     <span className={`acheck sel ${allSelected ? 'on' : ''}`} onClick={toggleSelectAll} />
                   </span>
@@ -1034,6 +989,7 @@ export function CatalogPage() {
                   <span>Brand</span>
                   <span>Supplier</span>
                   <span className="r">Available to sell</span>
+                  <span className="r">Special order demand</span>
                   <span className="r">Retail price</span>
                   <span className="c">Active</span>
                   <span>Created</span>
@@ -1050,7 +1006,7 @@ export function CatalogPage() {
                   const anyEnabled = members.some((m) => m.enabled);
                   return (
                     <div key={key}>
-                      <div className="arow prod2" onClick={() => isFamily && setExpanded((e) => (e === key ? null : key))}>
+                      <div className="arow prod2 prod3" onClick={() => setExpanded((e) => (e === key ? null : key))} style={{ cursor: 'pointer' }}>
                         <span className="c" onClick={(e) => e.stopPropagation()}>
                           <span
                             className={`acheck sel ${allSelected ? 'on' : ''}`}
@@ -1060,7 +1016,7 @@ export function CatalogPage() {
                           />
                         </span>
                         <span className="c">
-                          {isFamily && <span className={`pchev ${expanded === key ? 'open' : ''}`}>›</span>}
+                          <span className={`pchev ${expanded === key ? 'open' : ''}`}>›</span>
                         </span>
                         <span className="prod2-name">
                           <span className="pthumb">
@@ -1077,6 +1033,7 @@ export function CatalogPage() {
                         <span className="rlink">{lead.brand}</span>
                         <span className="rlink">{lead.supplier}</span>
                         <span className="r">{available}</span>
+                        <span className="r">0</span>
                         <span className="r">{priceLabel}</span>
                         <span className="c" onClick={(e) => e.stopPropagation()}>
                           <Switch on={anyEnabled} onClick={() => members.forEach((m) => (m.enabled === anyEnabled ? toggleActive(m.id) : undefined))} />
@@ -1093,18 +1050,17 @@ export function CatalogPage() {
                           ✎
                         </span>
                       </div>
-                      {expanded === key && isFamily && (
-                        <div className="prod-variants">
-                          {members.map((m) => (
-                            <div key={m.id} className="pvar-row">
-                              <span>
-                                <span className="rlink" onClick={() => startEditProd(m)}>{m.name}</span>
-                                <span className="prod-sku"> · {m.sku}</span>
-                              </span>
-                              <span className="r">{availableOf(m, products)} available · {fmt(m.priceMinor)}</span>
-                            </div>
-                          ))}
-                        </div>
+                      {expanded === key && (
+                        <ProductRowPanel
+                          product={lead}
+                          members={members}
+                          onDetails={startEditProd}
+                          onDuplicate={() => duplicateProduct(members)}
+                          onDelete={() => {
+                            members.forEach((m) => deleteProduct(m.id));
+                            setExpanded(null);
+                          }}
+                        />
                       )}
                     </div>
                   );
@@ -1145,7 +1101,7 @@ export function CatalogPage() {
                 />
               </div>
 
-              {editingEntity.type === 'supplier' && (
+              {(editingEntity.type === 'supplier' || editingEntity.type === 'brand') && (
                 <div className="set-field">
                   <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
                     Description
@@ -1327,75 +1283,6 @@ export function CatalogPage() {
         </div>
       )}
 
-      {showImportModal && (
-        <div className="pm-overlay" onClick={() => setShowImportModal(false)}>
-          <div className="pm" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '440px' }}>
-            <div className="pm-head">
-              <h2>Import Products</h2>
-              <button className="pm-close" onClick={() => setShowImportModal(false)} aria-label="Close">
-                ×
-              </button>
-            </div>
-            <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '18px', textAlign: 'center' }}>
-              {importStatus === 'idle' ? (
-                <>
-                  <div style={{ fontSize: '48px' }}>📁</div>
-                  <h3>Upload product spreadsheet</h3>
-                  <p style={{ color: 'var(--text-muted)', fontSize: '14px', margin: '0' }}>
-                    Select a CSV spreadsheet with a header row like name,price,sku,category (price in dollars) to
-                    quickly populate your catalog.
-                  </p>
-                  <input
-                    ref={importFileRef}
-                    type="file"
-                    accept=".csv,text/csv"
-                    style={{ display: 'none' }}
-                    onChange={(e) => {
-                      handleImportFile(e.target.files?.[0]);
-                      e.target.value = '';
-                    }}
-                  />
-                  <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', marginTop: '12px' }}>
-                    <button className="btn-s" onClick={() => setShowImportModal(false)}>
-                      Cancel
-                    </button>
-                    <button className="btn-p" onClick={() => importFileRef.current?.click()}>
-                      Select spreadsheet
-                    </button>
-                  </div>
-                </>
-              ) : importStatus === 'importing' ? (
-                <>
-                  <div className="sh-empty-icon" style={{ animation: 'spin 1.5s infinite linear' }}>
-                    ⏳
-                  </div>
-                  <h3>Importing catalog...</h3>
-                  <p style={{ color: 'var(--text-muted)', fontSize: '14px', margin: '0' }}>
-                    Please wait while Nova imports your products. This should only take a moment.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <div style={{ fontSize: '48px' }}>{importedCount > 0 ? '✅' : '⚠️'}</div>
-                  <h3>{importedCount > 0 ? 'Import complete!' : 'Nothing imported'}</h3>
-                  <p style={{ color: 'var(--text-muted)', fontSize: '14px', margin: '0' }}>
-                    {importedCount > 0
-                      ? `Imported ${importedCount} product${importedCount === 1 ? '' : 's'} from your spreadsheet.`
-                      : 'No valid rows found. Make sure the CSV has a header row with name and price columns.'}
-                  </p>
-                  <button
-                    className="btn-p"
-                    style={{ marginTop: '12px', alignSelf: 'center' }}
-                    onClick={() => setShowImportModal(false)}
-                  >
-                    View Catalog
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

@@ -30,6 +30,8 @@ export type ApplyMode = 'none' | 'quantity' | 'cost';
 
 export interface StockTxDetails {
   supplierInvoice: string;
+  /** Purchase orders: the outlet the order is placed for (defaults to the delivery outlet). */
+  orderingFor?: string;
   /** ISO date (yyyy-mm-dd) or ''. */
   deliveryDate: string;
   invoiceDate: string;

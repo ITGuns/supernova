@@ -6,16 +6,26 @@ import { useCart } from '../store/cartStore';
 import { useCatalogMeta } from '../store/catalogMetaStore';
 import { FULFILLMENT_LABEL, useFulfillments, type FulfillmentKind, type FulfillmentStatus } from '../store/fulfillmentStore';
 import { countBucket, txQty, txTotal, useInventory, type StockTx, type StockTxKind, type StockTxStatus } from '../store/inventoryStore';
+import { availableOf, useProducts } from '../store/productStore';
+import { useSerialNumbers } from '../store/serialNumberStore';
+import { useSetup } from '../store/setupStore';
+import { downloadCsv } from '../lib/csv';
 import '../styles/catalog.css';
 import { BagPhone, CatBox, InventoryGraphic, ScannerGraphic } from './illustrations';
 
 const NAV: ContextItem[] = [
   { key: 'stock', label: 'Stock control' },
   { key: 'counts', label: 'Inventory counts' },
+  { key: 'special', label: 'Special orders' },
+  { key: 'serials', label: 'Serial numbers' },
   { key: 'fulfillments', label: 'Fulfillments' },
 ];
 
-const TX_STATUSES: StockTxStatus[] = ['Open', 'Sent', 'Dispatched', 'Received', 'Cancelled'];
+/** The "Show" options on Stock control, in Lightspeed's order. */
+type ShowFilter = 'all' | StockTxStatus | 'Partially received' | 'Overdue';
+const SHOW_OPTIONS: ShowFilter[] = ['Open', 'Sent', 'Dispatched', 'Partially received', 'Received', 'Overdue', 'Cancelled'];
+const partiallyReceived = (t: StockTx) => t.status === 'Received' && t.lines.some((l) => (l.received ?? l.quantity) < l.quantity);
+const overdue = (t: StockTx, now = Date.now()) => t.dueAt !== null && t.dueAt < now && t.status !== 'Received' && t.status !== 'Cancelled';
 const ONBOARDING_KEY = 'nova-stock-onboarding-dismissed';
 
 type StockTab = 'orders' | 'transfers' | 'returns';
@@ -48,7 +58,7 @@ export function InventoryPage() {
   const [stockTab, setStockTab] = useState<StockTab>(state?.stockTab ?? 'orders');
   const [qDraft, setQDraft] = useState('');
   const [q, setQ] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | StockTxStatus>('all');
+  const [statusFilter, setStatusFilter] = useState<ShowFilter>('all');
   const [outletFilter, setOutletFilter] = useState('all');
   const [supplierFilter, setSupplierFilter] = useState('all');
   const [sortBy, setSortBy] = useState<'created-desc' | 'created-asc' | 'due-asc' | 'due-desc'>('created-desc');
@@ -84,7 +94,7 @@ export function InventoryPage() {
       (t) =>
         t.kind === kind &&
         (q.trim() === '' || matchesSearch(t, q.trim())) &&
-        (statusFilter === 'all' || t.status === statusFilter) &&
+        (statusFilter === 'all' || (statusFilter === 'Partially received' ? partiallyReceived(t) : statusFilter === 'Overdue' ? overdue(t) : t.status === statusFilter)) &&
         (outletFilter === 'all' || t.from === outletFilter || t.to === outletFilter) &&
         (supplierFilter === 'all' || t.from === supplierFilter || t.to === supplierFilter),
     )
@@ -148,6 +158,65 @@ export function InventoryPage() {
     (f) => (fulTab === 'all' || f.kind === fulTab) && (fulStatus === 'all' || f.status === fulStatus) && (fulType === 'all' || f.kind === fulType),
   );
   const outletName = outlets[0] ?? 'Main Outlet';
+  // Inventory counts: pull the latest count data from the cloud again.
+  const [resyncing, setResyncing] = useState(false);
+  const resyncCounts = async () => {
+    setResyncing(true);
+    await useInventory.getState().syncFromDb();
+    setResyncing(false);
+  };
+
+  // Special orders: customer demand (open fulfillments) the stock on hand can't cover.
+  const products = useProducts((s) => s.products);
+  const setupOutlets = useSetup((s) => s.outlets);
+  const [specialTab, setSpecialTab] = useState<'to-order' | 'ordered'>('to-order');
+  const [specialOutlet, setSpecialOutlet] = useState('all');
+  const [specialSupplier, setSpecialSupplier] = useState('all');
+  const [glossary, setGlossary] = useState(false);
+  const specialRows = fulfillments
+    .filter((f) => f.status === 'Open')
+    .flatMap((f) =>
+      f.lines.map((l) => {
+        const p = products.find((x) => x.id === l.variantId);
+        if (!p) return null;
+        const onHand = availableOf(p, products);
+        if (onHand >= l.quantity) return null;
+        const po = transactions.find((t) => t.kind === 'order' && (t.status === 'Open' || t.status === 'Sent' || t.status === 'Dispatched') && t.lines.some((x) => x.productId === p.id));
+        return { key: `${f.id}-${l.lineId}`, productId: p.id, name: p.name, customer: f.customerName, sale: f.number, supplier: p.supplier, needed: l.quantity - Math.max(0, onHand), onHand, outlet: outletName, ordered: !!po, orderId: po?.id ?? '', orderNumber: po?.number ?? '' };
+      }),
+    )
+    .filter((r): r is NonNullable<typeof r> => r !== null);
+  const visibleSpecial = specialRows.filter(
+    (r) => (specialTab === 'ordered') === r.ordered && (specialOutlet === 'all' || r.outlet === specialOutlet) && (specialSupplier === 'all' || r.supplier === specialSupplier),
+  );
+
+  // Serial numbers
+  const serials = useSerialNumbers((s) => s.serials);
+  const addSerials = useSerialNumbers((s) => s.addSerials);
+  const deleteSerial = useSerialNumbers((s) => s.deleteSerial);
+  const [serialQ, setSerialQ] = useState('');
+  const [serialProductQ, setSerialProductQ] = useState('');
+  const [serialOutlet, setSerialOutlet] = useState('all');
+  const [serialModal, setSerialModal] = useState(false);
+  const [serialProduct, setSerialProduct] = useState('');
+  const [serialAddOutlet, setSerialAddOutlet] = useState(setupOutlets[0]?.name ?? 'Main Outlet');
+  const [serialText, setSerialText] = useState('');
+  const [serialError, setSerialError] = useState('');
+  const [serialNotice, setSerialNotice] = useState('');
+  const visibleSerials = serials.filter((sn) => {
+    const p = products.find((x) => x.id === sn.productId);
+    return (
+      (serialQ.trim() === '' || sn.serial.toLowerCase().includes(serialQ.trim().toLowerCase())) &&
+      (serialProductQ.trim() === '' || sn.productName.toLowerCase().includes(serialProductQ.trim().toLowerCase()) || (p?.sku ?? '').toLowerCase().includes(serialProductQ.trim().toLowerCase())) &&
+      (serialOutlet === 'all' || sn.outlet === serialOutlet)
+    );
+  });
+  const exportSerials = () =>
+    downloadCsv('serial-numbers.csv', [
+      ['serial number', 'product', 'sku', 'outlet', 'status', 'date sold', 'sale'],
+      ...visibleSerials.map((sn) => [sn.serial, sn.productName, products.find((x) => x.id === sn.productId)?.sku ?? '', sn.outlet, sn.status, sn.soldAt ? new Date(sn.soldAt).toISOString() : '', sn.saleOrderNumber]),
+    ]);
+
   const retrieveFulfillment = (id: string) => {
     const f = fulfillments.find((x) => x.id === id);
     if (!f || f.status !== 'Open') return;
@@ -197,8 +266,9 @@ export function InventoryPage() {
                     <div>
                       <div className="onb-h">Update inventory levels to get selling.</div>
                       <div className="onb-t">
-                        Receive stock from your suppliers to set the inventory levels of the products you sell. Every order you
-                        receive updates stock on hand, so your counts and reports stay accurate.
+                        Track inventory levels to know exactly which products are in stock and able to be sold. We’ll help you get
+                        your current inventory levels into Nova Retail depending on how you’re keeping track of your inventory at the
+                        moment.
                       </div>
                       <div className="onb-actions">
                         <button className="btn-s" onClick={() => navigate('/inventory/receive')}>
@@ -220,12 +290,12 @@ export function InventoryPage() {
                     <select
                       className="set-select"
                       value={statusFilter}
-                      onChange={(e) => setStatusFilter(e.target.value as 'all' | StockTxStatus)}
+                      onChange={(e) => setStatusFilter(e.target.value as ShowFilter)}
                       style={selStyle}
                     >
                       <option value="all">All {stockTab}</option>
-                      {TX_STATUSES.map((s) => (
-                        <option key={s} value={s}>{s}</option>
+                      {SHOW_OPTIONS.map((s) => (
+                        <option key={s} value={s}>{s} {stockTab}</option>
                       ))}
                     </select>
                   </div>
@@ -447,6 +517,197 @@ export function InventoryPage() {
                   )}
                 </div>
               )}
+              <div className="inv-foot">
+                If you’re experiencing problems with your inventory count data,{' '}
+                <span className="rlink" onClick={resyncCounts}>{resyncing ? 'resyncing…' : 'resync your inventory counts'}</span>.
+              </div>
+            </>
+          )}
+
+          {active === 'special' && (
+            <>
+              <h1 className="page-title">Special orders</h1>
+              <div className="sh-tabs">
+                <button className={`sh-tab ${specialTab === 'to-order' ? 'active' : ''}`} onClick={() => setSpecialTab('to-order')}>
+                  To order products ({specialRows.filter((r) => !r.ordered).length})
+                </button>
+                <button className={`sh-tab ${specialTab === 'ordered' ? 'active' : ''}`} onClick={() => setSpecialTab('ordered')}>
+                  Ordered products ({specialRows.filter((r) => r.ordered).length})
+                </button>
+              </div>
+              <div className="subbar-row">
+                <span>
+                  Products customers have bought or reserved that aren’t in stock yet. Order them from your supplier, then receive the stock to fulfill the sale. <span className="rlink">Need help?</span>
+                </span>
+                <span className="rlink" onClick={() => setGlossary((v) => !v)}>Glossary</span>
+              </div>
+              {glossary && (
+                <div className="inv-glossary">
+                  <b>To order</b> — a customer sale or fulfillment needs more units than you have on hand and no purchase order includes the product yet.{' '}
+                  <b>Ordered</b> — an open purchase order includes the product; receiving it fulfills the demand.{' '}
+                  <b>Special order demand</b> — the units still owed to customers, shown per product on Catalog → Products.
+                </div>
+              )}
+              <div className="sc-filter-card">
+                <div className="sc-frow">
+                  <div className="f-field">
+                    <label>Outlet</label>
+                    <select className="set-select" value={specialOutlet} onChange={(e) => setSpecialOutlet(e.target.value)} style={selStyle}>
+                      <option value="all">All outlets</option>
+                      {setupOutlets.map((o) => <option key={o.id} value={o.name}>{o.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="f-field">
+                    <label>Supplier</label>
+                    <select className="set-select" value={specialSupplier} onChange={(e) => setSpecialSupplier(e.target.value)} style={selStyle}>
+                      <option value="all">All suppliers</option>
+                      {suppliers.map((sp) => <option key={sp.id} value={sp.name}>{sp.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div className="inv-count">Displaying {visibleSpecial.length} special order product{visibleSpecial.length === 1 ? '' : 's'}</div>
+              {visibleSpecial.length ? (
+                <div className="atable">
+                  <div className="inv-thead inv7">
+                    <span className="s">Product</span>
+                    <span className="s">Customer</span>
+                    <span className="s">Sale</span>
+                    <span className="s">Supplier</span>
+                    <span className="s r">Needed</span>
+                    <span className="s r">On hand</span>
+                    <span className="s r">{specialTab === 'ordered' ? 'Purchase order' : ''}</span>
+                  </div>
+                  {visibleSpecial.map((r) => (
+                    <div key={r.key} className="inv-row inv7">
+                      <span className="rlink strong" onClick={() => navigate(`/catalog/products/${r.productId}`)}>{r.name}</span>
+                      <span>{r.customer || '—'}</span>
+                      <span>{r.sale}</span>
+                      <span>{r.supplier || '—'}</span>
+                      <span className="r">{r.needed}</span>
+                      <span className="r">{r.onHand}</span>
+                      <span className="r">
+                        {r.ordered ? (
+                          <span className="rlink" onClick={() => navigate(`/inventory/stock/${r.orderId}`)}>{r.orderNumber}</span>
+                        ) : (
+                          <button className="btn-s" onClick={() => navigate('/inventory/orders/new', { state: { productId: r.productId, quantity: r.needed } })}>Order stock</button>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="astate">
+                  <CatBox />
+                  <div>{specialTab === 'to-order' ? 'No products to order. Sales and fulfillments that need more stock than you have will show here.' : 'No ordered special order products.'}</div>
+                </div>
+              )}
+            </>
+          )}
+
+          {active === 'serials' && (
+            <>
+              <h1 className="page-title">Serial numbers</h1>
+              <div className="subbar-row">
+                <span>
+                  Use serial numbers to track inventory movement and the sales history of your products. <span className="rlink">Need help?</span>
+                </span>
+                <button className="btn-p" onClick={() => setSerialModal(true)}>Add serial numbers</button>
+              </div>
+              <div className="sc-filter-card">
+                <div className="sc-frow">
+                  <div className="f-field">
+                    <label>Serial number</label>
+                    <input value={serialQ} onChange={(e) => setSerialQ(e.target.value)} placeholder="Enter serial number" />
+                  </div>
+                  <div className="f-field">
+                    <label>Product</label>
+                    <input value={serialProductQ} onChange={(e) => setSerialProductQ(e.target.value)} placeholder="Enter product name or SKU" />
+                  </div>
+                  <div className="f-field">
+                    <label>Outlet</label>
+                    <select className="set-select" value={serialOutlet} onChange={(e) => setSerialOutlet(e.target.value)} style={selStyle}>
+                      <option value="all">All outlets</option>
+                      {setupOutlets.map((o) => <option key={o.id} value={o.name}>{o.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="sc-factions split">
+                  <span className="rlink" onClick={() => { setSerialQ(''); setSerialProductQ(''); setSerialOutlet('all'); }}>Clear filters</span>
+                  <span className="rlink" onClick={exportSerials}>⤓ Export list</span>
+                </div>
+              </div>
+              <div className="inv-count">Displaying {visibleSerials.length} serial number{visibleSerials.length === 1 ? '' : 's'}</div>
+              {visibleSerials.length ? (
+                <div className="atable">
+                  <div className="inv-thead sn5">
+                    <span className="s">Serial number</span>
+                    <span className="s">Product</span>
+                    <span className="s">Outlet</span>
+                    <span className="s">Date sold</span>
+                    <span />
+                  </div>
+                  {visibleSerials.map((sn) => (
+                    <div key={sn.id} className="inv-row sn5">
+                      <span className="strong">{sn.serial}</span>
+                      <span className="rlink" onClick={() => navigate(`/catalog/products/${sn.productId}`)}>{sn.productName}</span>
+                      <span>{sn.outlet}</span>
+                      <span>{sn.soldAt ? `${new Date(sn.soldAt).toLocaleDateString()}${sn.saleOrderNumber ? ` · ${sn.saleOrderNumber}` : ''}` : <span className="tx-badge open">In stock</span>}</span>
+                      <span className="r"><span className="ic" onClick={() => deleteSerial(sn.id)} title="Remove serial number">🗑</span></span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="astate">
+                  <CatBox />
+                  <div>No serial numbers found. Add serial numbers to start tracking individual units.</div>
+                </div>
+              )}
+              {serialModal && (
+                <div className="pm-overlay" onClick={() => setSerialModal(false)}>
+                  <div className="pm reg-open" onClick={(e) => e.stopPropagation()} role="dialog">
+                    <div className="pm-head">
+                      <h2>Add serial numbers</h2>
+                      <button className="pm-close" onClick={() => setSerialModal(false)} aria-label="Close">×</button>
+                    </div>
+                    <form
+                      className="reg-open-body"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        const p = products.find((x) => x.id === serialProduct);
+                        if (!p) return setSerialError('Choose a product.');
+                        const list = serialText.split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean);
+                        if (!list.length) return setSerialError('Enter at least one serial number.');
+                        const n = addSerials(p.id, p.name, serialAddOutlet, list);
+                        setSerialNotice(n ? `${n} serial number${n === 1 ? '' : 's'} added to ${p.name}.` : 'Those serial numbers are already on file for this product.');
+                        setSerialText('');
+                        setSerialModal(false);
+                      }}
+                    >
+                      {serialError && <div className="pe-error" role="alert">{serialError}</div>}
+                      <label className="reg-open-field">
+                        <span>Product</span>
+                        <select value={serialProduct} onChange={(e) => { setSerialProduct(e.target.value); setSerialError(''); }}>
+                          <option value="">Select a product</option>
+                          {products.filter((x) => x.enabled).map((x) => <option key={x.id} value={x.id}>{x.name} · {x.sku}</option>)}
+                        </select>
+                      </label>
+                      <label className="reg-open-field">
+                        <span>Outlet</span>
+                        <select value={serialAddOutlet} onChange={(e) => setSerialAddOutlet(e.target.value)}>
+                          {setupOutlets.map((o) => <option key={o.id} value={o.name}>{o.name}</option>)}
+                        </select>
+                      </label>
+                      <label className="reg-open-field">
+                        <span>Serial numbers <span className="pe-hint">One per line, or separated by commas</span></span>
+                        <textarea rows={5} value={serialText} onChange={(e) => { setSerialText(e.target.value); setSerialError(''); }} placeholder={'SN-0001\nSN-0002'} />
+                      </label>
+                      <button className="pm-complete" type="submit">Add serial numbers</button>
+                    </form>
+                  </div>
+                </div>
+              )}
+              {serialNotice && <div className="sh-notice" role="status">{serialNotice} <span className="rlink" onClick={() => setSerialNotice('')}>Dismiss</span></div>}
             </>
           )}
 

@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { CatalogPage } from './admin/CatalogPage';
 import { CategoryEditor } from './admin/CategoryEditor';
 import { PriceBookEditor } from './admin/PriceBookEditor';
+import { ImportProductsPage } from './admin/ImportProductsPage';
 import { PromotionEditor } from './admin/PromotionEditor';
 import { CustomersPage } from './admin/CustomersPage';
 import { FinancePage } from './admin/FinancePage';
@@ -57,6 +58,7 @@ export function App() {
         <Route path="/reporting" element={<ReportingPage />} />
         <Route path="/catalog" element={<CatalogPage />} />
         <Route path="/catalog/products/new" element={<ProductEditor />} />
+        <Route path="/catalog/products/import" element={<ImportProductsPage />} />
         <Route path="/catalog/products/:id" element={<ProductEditor />} />
         <Route path="/catalog/suppliers/new" element={<SupplierEditor />} />
         <Route path="/catalog/suppliers/:id" element={<SupplierEditor />} />

@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { parseCsv } from '../lib/csv';
 import { fmt } from '../lib/format';
 import { useCatalogMeta } from '../store/catalogMetaStore';
 import {
@@ -14,11 +15,11 @@ import {
   type StockTxKind,
   type StockTxLine,
 } from '../store/inventoryStore';
-import { useProducts, type Product } from '../store/productStore';
+import { availableOf, useProducts, type Product } from '../store/productStore';
 import { useSetup } from '../store/setupStore';
 import { Switch } from './controls';
 import { Field, Section } from './FormLayout';
-import { MoneyInput, NumInput } from './NumInput';
+import { IntInput, MoneyInput, NumInput } from './NumInput';
 import '../styles/product-editor.css';
 
 // Full-page stock transaction form, in the Lightspeed layout:
@@ -80,17 +81,27 @@ export function StockTxEditor() {
   const outletNames = outlets.map((o) => o.name);
   const defaultOutlet = outletNames[0] ?? 'Main Outlet';
 
-  const [draft, setDraft] = useState<Draft>(() => ({
-    number: existing?.number ?? nextNumber(kind),
-    from: existing?.from ?? (kind === 'order' ? '' : defaultOutlet),
-    to: existing?.to ?? (kind === 'return' ? '' : defaultOutlet),
-    lines: existing?.lines.map((l) => ({ ...l })) ?? [],
-    details: {
-      ...EMPTY_TX_DETAILS,
-      ...(existing?.details ?? {}),
-      ...(existing ? {} : { deliveryDate: receiveMode ? todayIso() : '' }),
-    },
-  }));
+  // Special orders → "Order stock" arrives with the product (and units) to order.
+  const preset = (useLocation().state as { productId?: string; quantity?: number } | null) ?? null;
+  const [draft, setDraft] = useState<Draft>(() => {
+    const presetProduct = preset?.productId ? products.find((p) => p.id === preset.productId) : undefined;
+    return {
+      number: existing?.number ?? nextNumber(kind),
+      from: existing?.from ?? (kind === 'order' ? presetProduct?.supplier ?? '' : defaultOutlet),
+      to: existing?.to ?? (kind === 'return' ? '' : defaultOutlet),
+      lines:
+        existing?.lines.map((l) => ({ ...l })) ??
+        (presetProduct ? [{ productId: presetProduct.id, name: presetProduct.name, sku: presetProduct.sku, quantity: Math.max(1, preset?.quantity ?? 1), costMinor: presetProduct.supplierPriceMinor ?? 0 }] : []),
+      details: {
+        ...EMPTY_TX_DETAILS,
+        ...(existing?.details ?? {}),
+        ...(existing ? {} : { deliveryDate: receiveMode ? todayIso() : '', orderingFor: defaultOutlet }),
+      },
+    };
+  });
+  const csvRef = useRef<HTMLInputElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [quickScan, setQuickScan] = useState(false);
@@ -159,6 +170,87 @@ export function StockTxEditor() {
   const discount = txDiscount(preview);
   const total = txTotal(preview);
   const totalQty = draft.lines.reduce((s, l) => s + (useReceived ? l.received ?? l.quantity : l.quantity), 0);
+
+  // Landed cost per unit: supply price plus this line's share of shipping and duty.
+  const extras = draft.details.shippingMinor + draft.details.dutyMinor;
+  const landedPerUnit = (l: StockTxLine): number => {
+    const qty = useReceived ? l.received ?? l.quantity : l.quantity;
+    const cost = l.costMinor ?? 0;
+    if (qty <= 0) return cost;
+    const share = (amount: number, mode: ApplyMode) => {
+      if (mode === 'quantity' && totalQty > 0) return (amount * qty) / totalQty;
+      if (mode === 'cost' && subtotal > 0) return (amount * cost * qty) / subtotal;
+      return 0;
+    };
+    const extra = share(draft.details.shippingMinor, draft.details.shippingApply) + share(draft.details.dutyMinor, draft.details.dutyApply);
+    return Math.round(cost + extra / qty);
+  };
+  const onHand = (productId: string) => {
+    const p = products.find((x) => x.id === productId);
+    return p ? availableOf(p, products) : 0;
+  };
+
+  // Products from this supplier that have dropped to their reorder point / minimum.
+  const recommendations = products.filter((p) => {
+    if (!p.enabled || p.trackInventory === false || draft.lines.some((l) => l.productId === p.id)) return false;
+    if (kind === 'order' && draft.from && p.supplier !== draft.from) return false;
+    const stock = availableOf(p, products);
+    return p.replenishMethod === 'reorder' ? p.reorderPoint != null && stock <= p.reorderPoint : p.minQty != null && stock <= p.minQty;
+  });
+  const addRecommendations = () => {
+    if (!recommendations.length) return;
+    setDraft((d) => ({
+      ...d,
+      lines: [
+        ...d.lines,
+        ...recommendations.map((p): StockTxLine => {
+          const stock = availableOf(p, products);
+          const qty = p.replenishMethod === 'reorder' ? p.reorderQty ?? 1 : Math.max(1, (p.maxQty ?? stock + 1) - stock);
+          return { productId: p.id, name: p.name, sku: p.sku, quantity: Math.max(1, qty), costMinor: p.supplierPriceMinor ?? 0 };
+        }),
+      ],
+    }));
+    setNotice(`${recommendations.length} product${recommendations.length === 1 ? '' : 's'} added from recommendations.`);
+  };
+
+  // CSV with sku (or product name) + quantity (+ optional cost) columns.
+  const importCsv = (file: File | undefined) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const rows = parseCsv(typeof reader.result === 'string' ? reader.result : '');
+      const head = (rows[0] ?? []).map((h) => h.trim().toLowerCase());
+      const idx = (...names: string[]) => head.findIndex((h) => names.includes(h));
+      const iSku = idx('sku', 'sku code', 'code', 'supplier code');
+      const iName = idx('product', 'name', 'product name');
+      const iQty = idx('quantity', 'qty', 'order quantity', 'ordered');
+      const iCost = idx('cost', 'cost price', 'supply price', 'supplier price', 'price');
+      let added = 0;
+      let missed = 0;
+      setDraft((d) => {
+        const lines = [...d.lines];
+        for (const r of rows.slice(1)) {
+          const sku = iSku >= 0 ? (r[iSku] ?? '').trim().toLowerCase() : '';
+          const name = iName >= 0 ? (r[iName] ?? '').trim().toLowerCase() : '';
+          const p = products.find((x) => (sku && (x.sku.toLowerCase() === sku || (x.suppliers ?? []).some((c) => c.code.toLowerCase() === sku))) || (name && x.name.toLowerCase() === name));
+          if (!p) {
+            missed++;
+            continue;
+          }
+          const qty = Math.max(1, Math.floor(parseFloat(iQty >= 0 ? r[iQty] ?? '1' : '1') || 1));
+          const costText = iCost >= 0 ? (r[iCost] ?? '').replace(/[^0-9.]/g, '') : '';
+          const cost = costText ? Math.round(parseFloat(costText) * 100) : p.supplierPriceMinor ?? 0;
+          const at = lines.findIndex((l) => l.productId === p.id);
+          if (at >= 0) lines[at] = { ...lines[at]!, quantity: qty, costMinor: cost };
+          else lines.push({ productId: p.id, name: p.name, sku: p.sku, quantity: qty, costMinor: cost });
+          added++;
+        }
+        return { ...d, lines };
+      });
+      setNotice(`${added} product${added === 1 ? '' : 's'} loaded from ${file.name}${missed ? ` · ${missed} row${missed === 1 ? '' : 's'} didn’t match a product` : ''}.`);
+    };
+    reader.readAsText(file);
+  };
 
   if (id && !existing) {
     return (
@@ -265,9 +357,9 @@ export function StockTxEditor() {
       ? `Received ${existing.details.receivedAt ? new Date(existing.details.receivedAt).toLocaleString() : ''}`.trim()
       : `${existing.status} ${KIND_WORD[kind]} — created ${new Date(existing.createdAt).toLocaleDateString()}`
     : receiveMode
-    ? 'Receive stock from a supplier and update your inventory levels.'
+    ? 'Count and receive products that have been delivered from your suppliers to ensure your inventory stays accurate.'
     : kind === 'order'
-    ? 'Create a purchase order to send to your supplier.'
+    ? 'Add products to this purchase order to keep track of inbound inventory.'
     : kind === 'transfer'
     ? 'Move stock from one outlet to another.'
     : 'Send stock back to a supplier.';
@@ -304,10 +396,11 @@ export function StockTxEditor() {
           {existing && <span className={`tx-badge ${existing.status.toLowerCase()}`}>{existing.status}</span>}
         </div>
         <div className="pe-subbar">
-          <span>{subtitle}</span>
+          <span>{subtitle}{!existing && <> <span className="rlink">Need help?</span></>}</span>
           {actions}
         </div>
         {error && <div className="pe-error" role="alert">{error}</div>}
+        {notice && <div className="pe-notice" role="status">{notice} <span className="rlink" onClick={() => setNotice('')}>Dismiss</span></div>}
         {confirmAction && (
           <div className="pe-confirm" role="alertdialog">
             <span>
@@ -350,6 +443,13 @@ export function StockTxEditor() {
                   </select>
                 </Field>
               )}
+              {kind === 'order' && (
+                <Field label="Ordering for">
+                  <select className="pe-input" value={draft.details.orderingFor ?? draft.to} onChange={(e) => setDetails({ orderingFor: e.target.value })}>
+                    {outletNames.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </Field>
+              )}
               {kind === 'return' ? (
                 <Field label="Supplier">
                   <select className="pe-input" value={draft.to} onChange={(e) => set({ to: e.target.value })}>
@@ -358,41 +458,62 @@ export function StockTxEditor() {
                   </select>
                 </Field>
               ) : (
-                <Field label={kind === 'order' ? 'Delivery recipient' : 'Destination outlet'}>
+                <Field label={kind === 'order' ? 'Deliver to' : 'Destination outlet'}>
                   <select className="pe-input" value={draft.to} onChange={(e) => set({ to: e.target.value })}>
                     {outletNames.map((o) => <option key={o} value={o}>{o}</option>)}
                   </select>
                 </Field>
               )}
+              <Field label="Delivery date" hint={kind === 'order' && !receiveMode ? '(Optional)' : undefined}>
+                <input className="pe-input" type="date" value={draft.details.deliveryDate} onChange={(e) => setDetails({ deliveryDate: e.target.value })} />
+              </Field>
+              <Field label={kind === 'order' ? 'Order number' : kind === 'transfer' ? 'Transfer number' : 'Return number'} hint="Must be a unique number · 20 characters max">
+                <input className="pe-input" value={draft.number} maxLength={20} onChange={(e) => set({ number: e.target.value })} />
+                <span className="pe-counter">{draft.number.length}/20 characters</span>
+              </Field>
               {kind === 'order' && (
                 <Field label="Supplier invoice number" hint="(Optional)">
                   <input className="pe-input" value={draft.details.supplierInvoice} onChange={(e) => setDetails({ supplierInvoice: e.target.value })} />
                 </Field>
               )}
-              <Field label="Delivery date">
-                <input className="pe-input" type="date" value={draft.details.deliveryDate} onChange={(e) => setDetails({ deliveryDate: e.target.value })} />
-              </Field>
-              <Field label={kind === 'order' ? 'Order number' : kind === 'transfer' ? 'Transfer number' : 'Return number'} hint="Must be a unique number">
-                <input className="pe-input" value={draft.number} maxLength={20} onChange={(e) => set({ number: e.target.value })} />
-                <span className="pe-counter">{draft.number.length}/20 characters</span>
-              </Field>
               {kind === 'order' && (
                 <Field label="Supplier invoice date" hint="(Optional)">
                   <input className="pe-input" type="date" value={draft.details.invoiceDate} onChange={(e) => setDetails({ invoiceDate: e.target.value })} />
                 </Field>
               )}
-              <Field label="Note" hint="(Optional)" wide>
+              <Field label="Note" hint="(Optional) · 200 characters max" wide>
                 <textarea className="pe-input pe-textarea pe-note" maxLength={200} value={draft.details.note} onChange={(e) => setDetails({ note: e.target.value })} />
                 <span className="pe-counter">{draft.details.note.length}/200 characters</span>
               </Field>
             </div>
+            {kind === 'order' && !existing && (
+              <div className="pe-preview-card">
+                <span className="pe-caps">Preview</span>
+                <b>{draft.number || 'Order number'}</b>
+                <span>{draft.from || 'Supplier'} → {draft.to}{draft.details.deliveryDate ? ` · due ${new Date(`${draft.details.deliveryDate}T00:00:00`).toLocaleDateString()}` : ''}</span>
+              </div>
+            )}
           </fieldset>
         </Section>
 
-        <Section title="Products" hint={locked ? 'The products on this transaction.' : 'Search or scan to add a product'}>
+        <Section title={kind === 'order' && !receiveMode ? 'Products and costs' : 'Products'} hint={locked ? 'The products on this transaction.' : 'Search or scan to add a product'}>
+          {!locked && kind === 'order' && (
+            <div className="pe-cards two pe-gap">
+              <button type="button" className="pe-card" onClick={() => searchRef.current?.focus()}>
+                <b>Choose products</b>
+                <span>Search or scan products to add them to this {receiveMode ? 'delivery' : 'order'}.</span>
+              </button>
+              <button type="button" className="pe-card" onClick={() => csvRef.current?.click()}>
+                <b>Import from CSV</b>
+                <span>Upload a file with sku, quantity and cost columns.</span>
+              </button>
+              <input ref={csvRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={(e) => { importCsv(e.target.files?.[0]); e.target.value = ''; }} />
+            </div>
+          )}
           {!locked && (
             <div className="pe-searchwrap">
               <input
+                ref={searchRef}
                 className="pe-input"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -415,10 +536,17 @@ export function StockTxEditor() {
           <div className="pe-rowhead">
             <span className="pe-subhead">{kind === 'order' ? `Add products to this ${receiveMode ? 'delivery' : 'order'}` : `Products in this ${KIND_WORD[kind]}`}</span>
             {!locked && (
-              <label className="pe-switchrow">
-                <span>Quick scan mode</span>
-                <Switch on={quickScan} onClick={() => setQuickScan((v) => !v)} />
-              </label>
+              <span className="pe-inline">
+                {kind === 'order' && !receiveMode && (
+                  <span className="rlink" onClick={addRecommendations} title={recommendations.length ? `${recommendations.length} product${recommendations.length === 1 ? '' : 's'} at or below their reorder point` : 'No products are at their reorder point'}>
+                    Add products from recommendations{recommendations.length ? ` (${recommendations.length})` : ''}
+                  </span>
+                )}
+                <label className="pe-switchrow">
+                  <span>Quick scan mode</span>
+                  <Switch on={quickScan} onClick={() => setQuickScan((v) => !v)} />
+                </label>
+              </span>
             )}
           </div>
           {draft.lines.length ? (
@@ -426,25 +554,26 @@ export function StockTxEditor() {
               <thead>
                 <tr>
                   <th>Product</th>
-                  <th>SKU</th>
-                  <th className="r">{kind === 'order' ? 'Ordered' : 'Quantity'}</th>
-                  {showReceived && <th className="r">Received</th>}
-                  <th className="r">Supply price</th>
-                  <th className="r">Total</th>
+                  <th className="r">Current inventory</th>
+                  <th className="r">{kind === 'order' ? (showReceived ? 'Ordered' : 'Quantity') : 'Quantity'}</th>
+                  {showReceived && <th className="r">Received quantity</th>}
+                  <th className="r">{kind === 'order' ? (showReceived ? 'Supplier price per unit (USD)' : 'Cost price (USD)') : 'Supply price'}</th>
+                  {showReceived && <th className="r">Landed cost per unit (USD)</th>}
+                  <th className="r">Total cost (USD)</th>
                   {!locked && <th />}
                 </tr>
               </thead>
               <tbody>
                 {draft.lines.map((l, i) => (
                   <tr key={l.productId}>
-                    <td>{l.name}</td>
-                    <td className="pe-muted">{l.sku ?? ''}</td>
+                    <td>{l.name}<br /><span className="pe-muted">{l.sku ?? ''}</span></td>
+                    <td className="r">{onHand(l.productId)}</td>
                     <td className="r">
-                      <input className="pe-input pe-qty" type="number" min={0} value={l.quantity} disabled={locked} onChange={(e) => setLine(i, { quantity: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} />
+                      <IntInput className="pe-input pe-qty" int={l.quantity} disabled={locked} onChange={(n) => setLine(i, { quantity: Math.max(0, n ?? 0) })} />
                     </td>
                     {showReceived && (
                       <td className="r">
-                        <input className="pe-input pe-qty" type="number" min={0} value={receivedQty(l)} disabled={locked} onChange={(e) => setLine(i, { received: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} />
+                        <IntInput className="pe-input pe-qty" int={receivedQty(l)} disabled={locked} onChange={(n) => setLine(i, { received: Math.max(0, n ?? 0) })} />
                       </td>
                     )}
                     <td className="r">
@@ -452,6 +581,7 @@ export function StockTxEditor() {
                         <MoneyInput className="pe-input pe-cost" minor={l.costMinor ?? 0} disabled={locked} onChange={(v) => setLine(i, { costMinor: v })} />
                       </span>
                     </td>
+                    {showReceived && <td className="r">{fmt(landedPerUnit(l))}</td>}
                     <td className="r">{fmt((useReceived ? receivedQty(l) : l.quantity) * (l.costMinor ?? 0))}</td>
                     {!locked && (
                       <td className="r"><button type="button" className="pe-x" onClick={() => removeLine(i)} aria-label={`Remove ${l.name}`}>×</button></td>

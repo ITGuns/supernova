@@ -24,6 +24,8 @@ import { useProductTags } from './store/tagStore';
 import { usePromotions } from './store/promotionStore';
 import { usePriceBooks } from './store/priceBookStore';
 import { useFulfillments } from './store/fulfillmentStore';
+import { useInventoryAdjustments } from './store/inventoryAdjustmentStore';
+import { useSerialNumbers } from './store/serialNumberStore';
 import { startSyncQueue } from './lib/syncQueue';
 
 async function bootstrapDb() {
@@ -45,6 +47,8 @@ async function bootstrapDb() {
       usePromotions.getState().syncFromDb(),
       usePriceBooks.getState().syncFromDb(),
       useFulfillments.getState().syncFromDb(),
+      useInventoryAdjustments.getState().syncFromDb(),
+      useSerialNumbers.getState().syncFromDb(),
     ]);
   } catch (err) {
     console.warn('[bootstrap] Supabase sync failed, using cached data.', err);

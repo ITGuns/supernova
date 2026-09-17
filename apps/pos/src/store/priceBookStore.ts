@@ -9,6 +9,9 @@ import { dbPriceBooks } from '../lib/db';
 export interface PriceBookEntry {
   productId: string;
   priceMinor: number;
+  /** Optional quantity band the price applies to (e.g. 6+ units). */
+  minUnits?: number | null;
+  maxUnits?: number | null;
 }
 
 export interface PriceBook {
