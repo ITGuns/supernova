@@ -9,6 +9,7 @@ type IconName =
   | 'catalog'
   | 'inventory'
   | 'customers'
+  | 'services'
   | 'finance'
   | 'setup';
 
@@ -23,7 +24,7 @@ const MAIN: { key: IconName; to: string; label: string }[] = [
   { key: 'catalog', to: '/catalog', label: 'Catalog' },
   { key: 'inventory', to: '/inventory', label: 'Inventory' },
   { key: 'customers', to: '/customers', label: 'Customers' },
-  { key: 'finance', to: '/finance', label: 'Finance' },
+  { key: 'services', to: '/services', label: 'Services' },
   { key: 'setup', to: '/setup', label: 'Setup' },
 ];
 
@@ -44,6 +45,14 @@ function Icon({ name }: { name: IconName }) {
         <svg {...c}>
           <path d="M3 11 12 4l9 7" />
           <path d="M5 10v10h14V10" />
+        </svg>
+      );
+    case 'services':
+      return (
+        <svg {...c}>
+          <path d="M14.7 6.3a4 4 0 0 0 5 5L13 18l-3-3 6.7-8.7Z" />
+          <path d="m4 20 6-6" />
+          <path d="M3 21 6 18" />
         </svg>
       );
     case 'sell':

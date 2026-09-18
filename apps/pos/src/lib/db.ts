@@ -59,6 +59,9 @@ async function hasColumn(table: string, column: string): Promise<boolean | null>
 
 // ─── Settings ────────────────────────────────────────────────────────────────
 export const dbSettings = {
+  /** Whether settings has tax_groups (migration 0009) / tax_exclusive (0010). */
+  hasTaxGroups: () => hasColumn('settings', 'tax_groups'),
+  hasTaxExclusive: () => hasColumn('settings', 'tax_exclusive'),
   async get() {
     if (!ok()) return null;
     const { data, error } = await supabase
@@ -74,6 +77,8 @@ export const dbSettings = {
 
 // ─── Setup Config ────────────────────────────────────────────────────────────
 export const dbSetup = {
+  /** Whether setup_config has outlet_taxes (migration 0009). */
+  hasOutletTaxes: () => hasColumn('setup_config', 'outlet_taxes'),
   async get() {
     if (!ok()) return null;
     const { data, error } = await supabase
@@ -89,6 +94,8 @@ export const dbSetup = {
 
 // ─── Users ───────────────────────────────────────────────────────────────────
 export const dbUsers = {
+  /** Whether users has the details column (migration 0010). */
+  hasDetails: () => hasColumn('users', 'details'),
   async list() {
     if (!ok()) return null;
     const { data, error } = await supabase.from('users').select('*').order('created_at');
@@ -174,19 +181,24 @@ export const dbCustomers = {
   upsert: (row: Row) => upsert('customers', row),
   del: (id: string) => delBy('customers', 'id', id),
   // Customer groups
-  async listGroups() {
+  /** Group names with their creation time (created_at arrived with migration 0010; older tables return only names). */
+  async listGroups(): Promise<{ name: string; createdAt: number | null }[] | null> {
     if (!ok()) return null;
+    const withDate = await supabase.from('customer_groups').select('name, created_at').order('id');
+    if (!withDate.error) return (withDate.data ?? []).map((r: { name: string; created_at: string | null }) => ({ name: r.name, createdAt: r.created_at ? new Date(r.created_at).getTime() : null }));
     const { data, error } = await supabase.from('customer_groups').select('name').order('id');
     if (error) {
       reportDbError('customer_groups.list', error.message);
       return null;
     }
-    return (data ?? []).map((r: { name: string }) => r.name);
+    return (data ?? []).map((r: { name: string }) => ({ name: r.name, createdAt: null }));
   },
   addGroup: (name: string) => insert('customer_groups', { name }),
   delGroup: (name: string) => delBy('customer_groups', 'name', name),
   /** Whether customers have the on-account limit / loyalty columns (migration 0009). */
   hasLimitColumns: () => hasColumn('customers', 'on_account_limit_minor'),
+  /** Whether customers have the details column (migration 0010). */
+  hasDetails: () => hasColumn('customers', 'details'),
 };
 
 // ─── Sales ───────────────────────────────────────────────────────────────────

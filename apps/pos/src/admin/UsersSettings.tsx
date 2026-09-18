@@ -1,13 +1,13 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { fmt } from '../lib/format';
-import { hashPassword } from '../lib/password';
+import { useSetup } from '../store/setupStore';
 import { useCart } from '../store/cartStore';
 import { useRegisterSession } from '../store/registerSessionStore';
 import { initials, useUsers, type AppUser } from '../store/userStore';
 import { Switch } from './controls';
 import { MoneyInput } from './NumInput';
 
-const AVS = ['#5b8fd6', '#3fae6b', '#e6a817', '#e0483f', '#7c3aed'];
 
 /** A user's sales target for one period, saved when the field is left. */
 function Target({ minor, onChange }: { minor: number; onChange: (minor: number) => void }) {
@@ -48,8 +48,20 @@ const PERMISSIONS: { label: string; roles: string[] }[] = [
 const roleOf = (u: AppUser) => ROLES.find((r) => r.match.test(u.role))?.name ?? u.role;
 
 export function UsersSettings() {
+  const navigate = useNavigate();
   const [tab, setTab] = useState<'users' | 'roles' | 'activity'>('users');
   const users = useUsers((s) => s.users);
+  const outlets = useSetup((s) => s.outlets);
+  const [userQ, setUserQ] = useState('');
+  const [roleFilter, setRoleFilter] = useState('all');
+  const [outletFilter, setOutletFilter] = useState('all');
+  const [applied, setApplied] = useState({ q: '', role: 'all', outlet: 'all' });
+  const visibleUsers = users.filter(
+    (u) =>
+      (applied.q.trim() === '' || u.name.toLowerCase().includes(applied.q.trim().toLowerCase()) || u.email.toLowerCase().includes(applied.q.trim().toLowerCase())) &&
+      (applied.role === 'all' || u.role.includes(applied.role)) &&
+      (applied.outlet === 'all' || !(u.details?.outlets?.length) || u.details.outlets.includes(applied.outlet)),
+  );
   const sales = useCart((s) => s.sales);
   const closures = useRegisterSession((s) => s.closures);
   const movements = useRegisterSession((s) => s.movements);
@@ -70,38 +82,14 @@ export function UsersSettings() {
     for (const m of movements) rows.push({ at: m.at, user: m.by, what: `${m.type === 'ADD' ? 'Added cash' : 'Removed cash'}${m.note ? ` · ${m.note}` : ''}`, amount: m.type === 'ADD' ? m.amountMinor : -m.amountMinor });
     return rows.filter((r) => activityUser === 'All' || r.user === activityUser).sort((a, b) => b.at - a.at).slice(0, 100);
   })();
-  const addU = useUsers((s) => s.addUser);
   const updU = useUsers((s) => s.updateUser);
-  const delU = useUsers((s) => s.deleteUser);
   const togU = useUsers((s) => s.toggleUser);
 
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editName, setEditName] = useState('');
-  const [editEmail, setEditEmail] = useState('');
-  const [editRole, setEditRole] = useState('');
-  const [editPassword, setEditPassword] = useState('');
 
   const toggle = (id: string) => togU(id);
 
-  const addUser = async () => {
-    const n = users.length + 1;
-    addU({ name: `New User ${n}`, email: `new${n}@nova.local`, role: 'Cashier', password: await hashPassword('nova1234'), last: 'just now', enabled: true, av: AVS[n % AVS.length]! });
-  };
+  const addUser = () => navigate('/setup/users/new');
 
-  const saveUserEdit = async () => {
-    if (!editingId) return;
-    // A blank password field means "keep the current one" — we never prefill it.
-    const patch: Partial<AppUser> = { name: editName, email: editEmail, role: editRole };
-    if (editPassword.trim()) patch.password = await hashPassword(editPassword);
-    updU(editingId, patch);
-    setEditingId(null);
-  };
-
-  const deleteUser = () => {
-    if (!editingId) return;
-    delU(editingId);
-    setEditingId(null);
-  };
 
   return (
     <>
@@ -197,17 +185,23 @@ export function UsersSettings() {
           <div className="filter-row">
             <div className="f-field">
               <label>Search for users</label>
-              <input placeholder="Enter a name or email address" />
+              <input value={userQ} onChange={(e) => setUserQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && setApplied({ q: userQ, role: roleFilter, outlet: outletFilter })} placeholder="Enter a name or email address" />
             </div>
             <div className="f-field">
               <label>Role</label>
-              <div className="f-select">All roles</div>
+              <select className="set-select" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} style={{ height: '38px', background: 'var(--panel)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: '8px', padding: '0 8px' }}>
+                <option value="all">All roles</option>
+                <option>Admin</option><option>Manager</option><option>Cashier</option>
+              </select>
             </div>
             <div className="f-field">
               <label>Outlet</label>
-              <div className="f-select">All outlets</div>
+              <select className="set-select" value={outletFilter} onChange={(e) => setOutletFilter(e.target.value)} style={{ height: '38px', background: 'var(--panel)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: '8px', padding: '0 8px' }}>
+                <option value="all">All outlets</option>
+                {outlets.map((o) => <option key={o.id} value={o.name}>{o.name}</option>)}
+              </select>
             </div>
-            <button className="btn-p f-search">Search</button>
+            <button className="btn-p f-search" onClick={() => setApplied({ q: userQ, role: roleFilter, outlet: outletFilter })}>Search</button>
           </div>
           <div className="atable scroll-x">
             <div className="athead usr2">
@@ -220,22 +214,16 @@ export function UsersSettings() {
               <span>Last active</span>
               <span className="c">Enabled</span>
             </div>
-            {users.map((u) => (
+            {visibleUsers.map((u) => (
               <div key={u.id} className="arow usr2">
                 <span className="cust-name">
-                  <span className="cust-av" style={{ background: u.av }}>
-                    {initials(u.name)}
+                  <span className="cust-av" style={{ background: u.av, overflow: 'hidden' }}>
+                    {u.details?.picture ? <img src={u.details.picture} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : initials(u.name)}
                   </span>
                   <span>
                     <span
                       className="rlink"
-                      onClick={() => {
-                        setEditingId(u.id);
-                        setEditName(u.name);
-                        setEditEmail(u.email);
-                        setEditRole(u.role);
-                        setEditPassword('');
-                      }}
+                      onClick={() => navigate(`/setup/users/${u.id}`)}
                       style={{ cursor: 'pointer', fontWeight: 600 }}
                     >
                       {u.name}
@@ -245,7 +233,7 @@ export function UsersSettings() {
                   </span>
                 </span>
                 <span>{u.role}</span>
-                <span>All outlets</span>
+                <span>{u.details?.outlets?.length ? u.details.outlets.join(', ') : 'All outlets'}</span>
                 <span className="r">
                   <Target minor={u.targetDailyMinor ?? 0} onChange={(v) => updU(u.id, { targetDailyMinor: v })} />
                 </span>
@@ -269,103 +257,6 @@ export function UsersSettings() {
         </>
       )}
 
-      {editingId !== null && (
-        <div className="pm-overlay" onClick={() => setEditingId(null)}>
-          <div className="pm" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '460px' }}>
-            <div className="pm-head">
-              <h2>Edit user settings</h2>
-              <button className="pm-close" onClick={() => setEditingId(null)} aria-label="Close">
-                ×
-              </button>
-            </div>
-            <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
-              <div className="set-field" style={{ maxWidth: '100%' }}>
-                <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                  Full name
-                </label>
-                <input
-                  className="set-input"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  placeholder="e.g. Alex Kim"
-                  style={{ width: '100%', boxSizing: 'border-box' }}
-                />
-              </div>
-
-              <div className="set-field" style={{ maxWidth: '100%' }}>
-                <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                  Email address
-                </label>
-                <input
-                  className="set-input"
-                  value={editEmail}
-                  onChange={(e) => setEditEmail(e.target.value)}
-                  placeholder="e.g. alex@nova.local"
-                  style={{ width: '100%', boxSizing: 'border-box' }}
-                />
-              </div>
-
-              <div className="set-field" style={{ maxWidth: '100%' }}>
-                <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                  Role
-                </label>
-                <select
-                  className="set-select"
-                  value={editRole}
-                  onChange={(e) => setEditRole(e.target.value)}
-                  style={{ width: '100%', boxSizing: 'border-box', height: '40px' }}
-                >
-                  <option value="Admin">Admin</option>
-                  <option value="Account owner, Admin">Account owner, Admin</option>
-                  <option value="Manager">Manager</option>
-                  <option value="Cashier">Cashier</option>
-                </select>
-              </div>
-
-              <div className="set-field" style={{ maxWidth: '100%' }}>
-                <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                  Password
-                </label>
-                <input
-                  className="set-input"
-                  value={editPassword}
-                  onChange={(e) => setEditPassword(e.target.value)}
-                  placeholder="Leave blank to keep current password"
-                  style={{ width: '100%', boxSizing: 'border-box' }}
-                />
-                <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '6px' }}>Used to log in and to switch users.</div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '12px', alignItems: 'center' }}>
-                <button
-                  type="button"
-                  onClick={deleteUser}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#e11d48',
-                    cursor: 'pointer',
-                    fontWeight: 600,
-                    fontSize: '14px',
-                    padding: '8px 0',
-                    outline: 'none',
-                  }}
-                >
-                  Delete user
-                </button>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <button className="btn-s" onClick={() => setEditingId(null)} type="button">
-                    Cancel
-                  </button>
-                  <button className="btn-p" onClick={saveUserEdit} disabled={!editName.trim()} type="button">
-                    Save changes
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

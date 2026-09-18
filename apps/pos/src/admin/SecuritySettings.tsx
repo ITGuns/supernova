@@ -200,6 +200,42 @@ export function SecuritySettings() {
 
         <div className="setrow">
           <div>
+            <div className="set-h">Single sign-on</div>
+            <div className="set-desc">Let your team sign in with the identity provider your business already uses.</div>
+          </div>
+          <div className="set-fields sec-fields">
+            <div className="sec-group">
+              <div className="sec-group-h">SINGLE SIGN-ON (SSO)</div>
+              <div className="chk-row" onClick={() => sec.set({ ssoEnabled: !sec.ssoEnabled })}>
+                <span className={`chk ${sec.ssoEnabled ? 'on' : ''}`}>{sec.ssoEnabled ? '✓' : ''}</span>
+                <div className="chk-label">Allow users to sign in with single sign-on</div>
+              </div>
+              {sec.ssoEnabled && (
+                <div className="set-two" style={{ marginTop: 10 }}>
+                  <div className="set-field">
+                    <label>Identity provider</label>
+                    <select className="set-select" value={sec.ssoProvider} onChange={(e) => sec.set({ ssoProvider: e.target.value })}>
+                      <option>Google Workspace</option><option>Microsoft Entra ID</option><option>Okta</option><option>Other (SAML)</option>
+                    </select>
+                  </div>
+                  <div className="set-field">
+                    <label>Email domain</label>
+                    <input className="set-input" value={sec.ssoDomain} onChange={(e) => sec.set({ ssoDomain: e.target.value })} placeholder="e.g. yourchurch.org" />
+                  </div>
+                </div>
+              )}
+              {sec.ssoEnabled && (
+                <div className="chk-row" onClick={() => sec.set({ ssoEnforce: !sec.ssoEnforce })}>
+                  <span className={`chk ${sec.ssoEnforce ? 'on' : ''}`}>{sec.ssoEnforce ? '✓' : ''}</span>
+                  <div className="chk-label">Require single sign-on for everyone except the account owner</div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="setrow">
+          <div>
             <div className="set-h">Role specific settings</div>
             <div className="set-desc">Ensure your account is secure by restricting access to specific roles.</div>
           </div>

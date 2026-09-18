@@ -3,6 +3,9 @@ import { CatalogPage } from './admin/CatalogPage';
 import { CategoryEditor } from './admin/CategoryEditor';
 import { PriceBookEditor } from './admin/PriceBookEditor';
 import { ImportProductsPage } from './admin/ImportProductsPage';
+import { UserEditor } from './admin/UserEditor';
+import { ServicesPage } from './admin/ServicesPage';
+import { ServiceEditor } from './admin/ServiceEditor';
 import { PromotionEditor } from './admin/PromotionEditor';
 import { CustomersPage } from './admin/CustomersPage';
 import { FinancePage } from './admin/FinancePage';
@@ -79,6 +82,11 @@ export function App() {
         <Route path="/customers" element={<CustomersPage />} />
         <Route path="/finance" element={<FinancePage />} />
         <Route path="/setup" element={<SetupPage />} />
+        <Route path="/setup/users/new" element={<UserEditor />} />
+        <Route path="/setup/users/:id" element={<UserEditor />} />
+        <Route path="/services" element={<ServicesPage />} />
+        <Route path="/services/new" element={<ServiceEditor />} />
+        <Route path="/services/:id" element={<ServiceEditor />} />
       </Route>
       </Route>
 

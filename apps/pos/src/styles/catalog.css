@@ -304,3 +304,33 @@
 .inv-row.sn5 {
   grid-template-columns: 1.4fr 2fr 1.2fr 1.4fr 0.4fr;
 }
+
+/* Customer groups with a created column */
+.athead.grp4,
+.arow.grp4 {
+  grid-template-columns: 2fr 1.2fr 1fr 0.5fr;
+}
+/* Add customer pop-up */
+.cm-modal { max-width: 720px; width: 94vw; }
+.cm-tabs { padding: 0 24px; }
+.cm-body { padding: 18px 24px 8px; }
+.cm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
+.cm-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text); }
+.cm-field .set-input, .cm-field .set-select { width: 100%; box-sizing: border-box; font-weight: 400; }
+.cm-field.cm-wide { grid-column: 1 / -1; }
+.cm-field.cm-check { flex-direction: row; align-items: center; gap: 10px; font-weight: 400; grid-column: 1 / -1; }
+.cm-field.cm-check input { accent-color: var(--primary); }
+.cm-sub { font-size: 11px; letter-spacing: 0.06em; color: var(--muted); font-weight: 700; margin: 4px 0 10px; }
+.cm-notes { min-height: 80px; resize: vertical; font: inherit; }
+.cm-money { display: flex; align-items: center; gap: 6px; }
+.cm-hint { font-size: 12px; color: var(--muted); font-weight: 400; }
+@media (max-width: 640px) { .cm-grid { grid-template-columns: 1fr; } }
+
+/* Services */
+.inv-thead.svc4,
+.inv-row.svc4 {
+  grid-template-columns: 2.2fr 1.4fr 1fr 1.8fr;
+}
+.svc-status { height: 32px; max-width: 190px; margin-right: 6px; }
+.svc-note { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); margin-bottom: 8px; font-size: 14px; }
+.svc-note-meta { font-size: 12px; color: var(--muted); margin-bottom: 4px; }

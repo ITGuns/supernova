@@ -112,6 +112,7 @@ export function RegisterScreen() {
               <div className="reg-more-menu" onMouseLeave={() => setMoreOpen(false)}>
                 <button onClick={() => { setQuoteOpen(true); setMoreOpen(false); }} disabled={empty || !!openSaleNumber}>Create a quote</button>
                 <button onClick={() => { setServiceOpen(true); setMoreOpen(false); }}>Create a service sale</button>
+                <button onClick={() => { setMoreOpen(false); nav('/services/new', { state: { customerName, lines } }); }}>Create service</button>
                 <button onClick={() => { setFulfilOpen(true); setMoreOpen(false); }} disabled={empty || !!openSaleNumber}>Mark as unfulfilled</button>
                 <button onClick={() => { setAssignOpen(true); setMoreOpen(false); }} disabled={empty}>Assign all sale items</button>
                 <button onClick={() => { clear(); setMoreOpen(false); }} disabled={empty}>

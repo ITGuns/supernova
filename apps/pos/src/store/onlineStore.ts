@@ -6,7 +6,10 @@ import { persist } from 'zustand/middleware';
 interface OnlineState {
   enabled: boolean;
   subdomain: string;
-  set: (patch: Partial<Pick<OnlineState, 'enabled' | 'subdomain'>>) => void;
+  /** AI Showroom: a generated, shareable showcase page for your catalog. */
+  showroom: boolean;
+  showroomTagline: string;
+  set: (patch: Partial<Pick<OnlineState, 'enabled' | 'subdomain' | 'showroom' | 'showroomTagline'>>) => void;
 }
 
 export const useOnline = create<OnlineState>()(
@@ -14,6 +17,8 @@ export const useOnline = create<OnlineState>()(
     (set) => ({
       enabled: false,
       subdomain: 'nova-downtown',
+      showroom: false,
+      showroomTagline: '',
       set: (patch) => set(patch),
     }),
     { name: 'nova-online-v1' },

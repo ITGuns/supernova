@@ -6,7 +6,10 @@ import { initials, useUsers } from '../store/userStore';
 import { fmt } from '../lib/format';
 import { ContextNav, type ContextItem } from '../shell/ContextNav';
 import { saleCost, saleRevenue, useCart } from '../store/cartStore';
-import { methodOf, tenderLabel } from '../lib/tenders';
+import { STORE_CREDIT, isCash, methodOf, tenderLabel } from '../lib/tenders';
+import { useInventory } from '../store/inventoryStore';
+import { useSharedReports } from '../store/sharedReportsStore';
+import { fmtMinutes, minutesWorked, useTimeEntries } from '../store/timeEntryStore';
 import { useSetup } from '../store/setupStore';
 import { useSettings } from '../store/settingsStore';
 import { useAdjustmentReasons } from '../store/adjustmentReasonsStore';
@@ -26,6 +29,7 @@ const NAV: ContextItem[] = [
   { key: 'storecredit', label: 'Store credit reports' },
   { key: 'tax', label: 'Tax reports' },
   { key: 'user', label: 'User reports' },
+  { key: 'shared', label: 'Shared reports' },
 ];
 
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -215,6 +219,10 @@ interface ClosureRow {
   counted: number | null;
   variance: number | null;
   open: boolean;
+  /** Takings during the session: cash net of change, store credit, everything. */
+  cash: number;
+  storeCredit: number;
+  total: number;
 }
 
 interface CashRow {
@@ -275,12 +283,23 @@ export function ReportingPage() {
   // Cash movement / Inventory
   const [cashType, setCashType] = useState('All cash movement types');
   const [cashNote, setCashNote] = useState('');
-  const [invTab, setInvTab] = useState<'summary' | 'replenishment' | 'performance'>('summary');
+  const [invTab, setInvTab] = useState<'turns' | 'summary' | 'replenishment' | 'performance' | 'outofstock' | 'sellthrough' | 'dusty'>('summary');
   const [invReport, setInvReport] = useState('Product');
   const [invMeasure, setInvMeasure] = useState('Low inventory');
 
   // Sales report
   const [salesReport, setSalesReport] = useState('Sales summary');
+  const [salesTab, setSalesTab] = useState<'summary' | 'individual' | 'hour'>('summary');
+  const [salesView, setSalesView] = useState<'table' | 'chart'>('table');
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [shareModal, setShareModal] = useState<{ report: string; recipients: string } | null>(null);
+  const [shareError, setShareError] = useState('');
+  const sharedReports = useSharedReports((s) => s.shared);
+  const shareReport = useSharedReports((s) => s.share);
+  const unshareReport = useSharedReports((s) => s.unshare);
+  const currentUserId = useUsers((s) => s.currentUserId);
+  const timeEntries = useTimeEntries((s) => s.entries);
+  const stockTransactions = useInventory((s) => s.transactions);
   const [salesMeasure, setSalesMeasure] = useState('Revenue');
   const [salesComparison, setSalesComparison] = useState('No comparison');
   const [salesRange, setSalesRange] = useState(() => rangeLabel(today(), today()));
@@ -330,6 +349,8 @@ export function ReportingPage() {
   const [userRange, setUserRange] = useState(() => rangeLabel(daysAgo(7), today()));
   const [partnerOpen, setPartnerOpen] = useState(true);
   const [userSort, setUserSort] = useState<'asc' | 'desc'>('asc');
+  const [userExpanded, setUserExpanded] = useState<string | null>(null);
+  const deleteTimeEntry = useTimeEntries((s) => s.deleteEntry);
 
   // Gift card
   const [gcQuery, setGcQuery] = useState('');
@@ -374,7 +395,8 @@ export function ReportingPage() {
       const items = inB.reduce((a, x) => a + x.lines.reduce((q, l) => q + l.quantity, 0), 0);
       const custs = new Set(inB.map((x) => x.customer).filter(Boolean)).size;
       const profit = inB.reduce((a, x) => a + saleRevenue(x) - saleCost(x, allProducts), 0);
-      return { rev, count: inB.length, items, custs, profit };
+      const discounted = inB.reduce((a, x) => a + (x.discountMinor ?? 0), 0);
+      return { rev, count: inB.length, items, custs, profit, discounted };
     });
     const labels = starts.map((d) =>
       view === 'Month'
@@ -407,6 +429,57 @@ export function ReportingPage() {
       tax: taxMinor,
     };
   }, [salesFiltered, allProducts]);
+
+  // Individual performance: what each staff member sold in the range.
+  const salesByUser = useMemo(() => {
+    const m = new Map<string, { rev: number; count: number; items: number; profit: number }>();
+    for (const s of salesFiltered) {
+      const key = s.soldBy ?? 'Staff';
+      const cur = m.get(key) ?? { rev: 0, count: 0, items: 0, profit: 0 };
+      cur.rev += saleRevenue(s);
+      cur.count += 1;
+      cur.items += s.lines.reduce((a, l) => a + l.quantity, 0);
+      cur.profit += saleRevenue(s) - saleCost(s, allProducts);
+      m.set(key, cur);
+    }
+    return [...m.entries()].sort((a, b) => b[1].rev - a[1].rev);
+  }, [salesFiltered, allProducts]);
+  // Sales by hour of day across the range.
+  const salesByHour = useMemo(() => {
+    const hours = Array.from({ length: 24 }, (_, h) => ({ hour: h, rev: 0, count: 0, items: 0 }));
+    for (const s of salesFiltered) {
+      const b = hours[new Date(s.at).getHours()];
+      if (!b) continue;
+      b.rev += saleRevenue(s);
+      b.count += 1;
+      b.items += s.lines.reduce((a, l) => a + l.quantity, 0);
+    }
+    return hours;
+  }, [salesFiltered]);
+  // Revenue per day across the range, for the chart view.
+  const salesByDay = useMemo(() => {
+    const days: { label: string; rev: number }[] = [];
+    const d = new Date(salesParsedRange.start);
+    d.setHours(0, 0, 0, 0);
+    const end = salesParsedRange.end.getTime();
+    let guard = 0;
+    while (d.getTime() <= end && guard < 92) {
+      const s0 = d.getTime();
+      const s1 = s0 + DAY_MS;
+      days.push({ label: `${MON[d.getMonth()]} ${d.getDate()}`, rev: salesFiltered.filter((s) => s.at >= s0 && s.at < s1).reduce((a, s) => a + saleRevenue(s), 0) });
+      d.setDate(d.getDate() + 1);
+      guard++;
+    }
+    return days;
+  }, [salesFiltered, salesParsedRange]);
+  const shareNow = () => {
+    if (!shareModal) return;
+    const recipients = shareModal.recipients.split(/[,;\s]+/).map((r) => r.trim()).filter(Boolean);
+    if (!recipients.length || recipients.some((r) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r))) return setShareError('Enter one or more valid email addresses.');
+    shareReport(shareModal.report, staffUsers.find((u) => u.id === currentUserId)?.name ?? 'You', recipients);
+    setShareModal(null);
+    setShareError('');
+  };
 
   const dayHeaderLabel = useMemo(() => {
     const startDay = salesParsedRange.start;
@@ -492,9 +565,69 @@ export function ReportingPage() {
     };
   }, [invFiltered, invProducts]);
 
+  // The other inventory report tabs, all from the same month-to-date sales.
+  const invExtra = useMemo(() => {
+    const soldQty = new Map<string, number>();
+    const soldRev = new Map<string, number>();
+    const soldCost = new Map<string, number>();
+    const lastSold = new Map<string, number>();
+    for (const s of sales) {
+      if (s.status === 'Returned' || s.status === 'Voided' || s.training) continue;
+      for (const l of s.lines) {
+        // Older sale lines may lack the product id; match them by name.
+        const vid = l.variantId ?? invProducts.find((p) => p.name === l.name)?.id;
+        if (!vid) continue;
+        lastSold.set(vid, Math.max(lastSold.get(vid) ?? 0, s.at));
+        if (!invFiltered.includes(s)) continue;
+        soldQty.set(vid, (soldQty.get(vid) ?? 0) + l.quantity);
+        soldRev.set(vid, (soldRev.get(vid) ?? 0) + l.unitPriceMinor * l.quantity * (1 - (l.discountPct ?? 0) / 100));
+        soldCost.set(vid, (soldCost.get(vid) ?? 0) + (l.costMinor ?? invProducts.find((p) => p.id === vid)?.supplierPriceMinor ?? 0) * l.quantity);
+      }
+    }
+    const rows = invProducts.filter((p) => p.enabled).map((p) => {
+      const qty = soldQty.get(p.id) ?? 0;
+      const rev = Math.round(soldRev.get(p.id) ?? 0);
+      const cogs = soldCost.get(p.id) ?? 0;
+      const stockValue = (p.supplierPriceMinor ?? 0) * p.available;
+      const reorderAt = p.replenishMethod === 'reorder' ? p.reorderPoint : p.minQty;
+      const reorderQty = p.replenishMethod === 'reorder' ? p.reorderQty : p.maxQty != null ? Math.max(0, p.maxQty - p.available) : null;
+      const onOrder = stockTransactions.filter((t) => t.kind === 'order' && (t.status === 'Open' || t.status === 'Sent' || t.status === 'Dispatched')).reduce((a, t) => a + t.lines.filter((l) => l.productId === p.id).reduce((q, l) => q + l.quantity, 0), 0);
+      return {
+        id: p.id,
+        name: p.name,
+        sku: p.sku,
+        emoji: p.emoji,
+        supplier: p.supplier,
+        stock: p.available,
+        qty,
+        rev,
+        cogs,
+        profit: rev - cogs,
+        margin: rev > 0 ? Math.round(((rev - cogs) / rev) * 1000) / 10 : 0,
+        stockValue,
+        turns: stockValue > 0 ? Math.round((cogs / stockValue) * 100) / 100 : qty > 0 ? Infinity : 0,
+        sellThrough: qty + p.available > 0 ? Math.round((qty / (qty + p.available)) * 1000) / 10 : 0,
+        reorderAt: reorderAt ?? null,
+        reorderQty: reorderQty ?? null,
+        onOrder,
+        lastSold: lastSold.get(p.id) ?? null,
+        low: p.trackInventory !== false && reorderAt != null && p.available <= reorderAt,
+      };
+    });
+    const ninetyDays = Date.now() - 90 * DAY_MS;
+    return {
+      turns: [...rows].sort((a, b) => b.turns - a.turns),
+      replenishment: rows.filter((r) => r.low).sort((a, b) => a.stock - b.stock),
+      performance: [...rows].sort((a, b) => b.rev - a.rev),
+      outOfStock: rows.filter((r) => r.stock <= 0).sort((a, b) => (b.lastSold ?? 0) - (a.lastSold ?? 0)),
+      sellThrough: [...rows].sort((a, b) => b.sellThrough - a.sellThrough),
+      dusty: rows.filter((r) => r.stock > 0 && (r.lastSold === null || r.lastSold < ninetyDays)).sort((a, b) => b.stockValue - a.stockValue),
+    };
+  }, [sales, invFiltered, invProducts, stockTransactions]);
+
   const money = (minor: number) => (minor === 0 ? '$0' : fmt(minor));
   const bs = dash.buckets;
-  const curB = bs[bs.length - 1] ?? { rev: 0, count: 0, items: 0, custs: 0, profit: 0 };
+  const curB = bs[bs.length - 1] ?? { rev: 0, count: 0, items: 0, custs: 0, profit: 0, discounted: 0 };
   const trim = (v: number) => String(Math.round(v * 100) / 100);
   const kpis = [
     { label: 'Revenue', value: money(curB.rev), series: bs.map((b) => b.rev / 100), fmtY: kMoney },
@@ -503,11 +636,28 @@ export function ReportingPage() {
     { label: 'Gross profit', value: money(curB.profit), series: bs.map((b) => b.profit / 100), fmtY: kMoney },
     { label: 'Avg. sale value', value: money(curB.count ? Math.round(curB.rev / curB.count) : 0), series: bs.map((b) => (b.count ? b.rev / b.count / 100 : 0)), fmtY: trim },
     { label: 'Avg. items per sale', value: curB.count ? trim(curB.items / curB.count) : '0', series: bs.map((b) => (b.count ? b.items / b.count : 0)), fmtY: trim },
+    { label: 'Discounted', value: money(curB.discounted), series: bs.map((b) => b.discounted / 100), fmtY: kMoney },
+    { label: 'Discounted %', value: `${curB.rev + curB.discounted > 0 ? trim((curB.discounted / (curB.rev + curB.discounted)) * 100) : '0'}%`, series: bs.map((b) => (b.rev + b.discounted > 0 ? (b.discounted / (b.rev + b.discounted)) * 100 : 0)), fmtY: trim },
   ].map((k) => ({ ...k, yTicks: niceTicks(Math.max(...k.series)) }));
 
   // Register closures: real history from the register session store, with the
   // currently open session shown as a "Still open" row on top.
   const closureRows = useMemo<ClosureRow[]>(() => {
+    const takings = (from: number, to: number | null) => {
+      const inS = sales.filter((x) => !x.training && x.status !== 'Voided' && x.at >= from && x.at <= (to ?? Number.MAX_SAFE_INTEGER));
+      let cash = 0;
+      let storeCredit = 0;
+      let total = 0;
+      for (const x of inS) {
+        for (const t of x.tenders) {
+          if (isCash(t.method)) cash += t.amountMinor;
+          if (t.method === STORE_CREDIT) storeCredit += t.amountMinor;
+        }
+        cash -= x.changeMinor;
+        total += x.tenders.reduce((a, t) => a + t.amountMinor, 0) - x.changeMinor;
+      }
+      return { cash, storeCredit, total };
+    };
     const rows: ClosureRow[] = regClosures.map((c) => ({
       num: c.number,
       opened: c.openedAt,
@@ -517,6 +667,7 @@ export function ReportingPage() {
       counted: c.countedMinor,
       variance: c.varianceMinor,
       open: false,
+      ...takings(c.openedAt, c.closedAt),
     }));
     if (regStatus === 'open' && regOpenedAt !== null)
       rows.unshift({
@@ -528,9 +679,10 @@ export function ReportingPage() {
         counted: null,
         variance: null,
         open: true,
+        ...takings(regOpenedAt, null),
       });
     return rows;
-  }, [regClosures, regStatus, regOpenedAt, regClosureSeq, regOpeningFloat]);
+  }, [regClosures, regStatus, regOpenedAt, regClosureSeq, regOpeningFloat, sales]);
 
   const totalPages = Math.max(1, Math.ceil(closureRows.length / PAGE_SIZE));
   const curPage = Math.min(page, totalPages);
@@ -546,13 +698,16 @@ export function ReportingPage() {
   };
   const exportClosures = () =>
     downloadCSV('register-closures.csv', [
-      ['Register', '#', 'Time Opened', 'Time Closed', 'Opening Float', 'Expected', 'Counted', 'Variance'],
+      ['Register', '#', 'Time Opened', 'Time Closed', 'Opening Float', 'Cash', 'Store Credit', 'Total', 'Expected', 'Counted', 'Variance'],
       ...closureRows.map((r) => [
         'Main Register',
         String(r.num),
         `"${fmtDateTime(new Date(r.opened))}"`,
         r.open ? 'Still open' : `"${fmtDateTime(new Date(r.closed!))}"`,
         (r.openingFloat / 100).toFixed(2),
+        (r.cash / 100).toFixed(2),
+        (r.storeCredit / 100).toFixed(2),
+        (r.total / 100).toFixed(2),
         r.expected === null ? '-' : (r.expected / 100).toFixed(2),
         r.counted === null ? '-' : (r.counted / 100).toFixed(2),
         r.variance === null ? '-' : (r.variance / 100).toFixed(2),
@@ -646,12 +801,20 @@ export function ReportingPage() {
     return m;
   }, [sales]);
 
-  const topMap = new Map<string, { qty: number; rev: number }>();
-  for (const sale of periodSales)
-    for (const l of sale.lines) {
-      const cur = topMap.get(l.name) ?? { qty: 0, rev: 0 };
-      topMap.set(l.name, { qty: cur.qty + l.quantity, rev: cur.rev + l.unitPriceMinor * l.quantity });
-    }
+  // Per product: units, revenue and how much discount they carried (their own
+  // line discount plus a share of any sale-wide discount).
+  const topMap = new Map<string, { qty: number; rev: number; disc: number }>();
+  for (const sale of periodSales) {
+    const gross = sale.lines.reduce((a, l) => a + l.unitPriceMinor * l.quantity, 0);
+    const lineDiscs = sale.lines.map((l) => Math.round(l.unitPriceMinor * l.quantity * ((l.discountPct ?? 0) / 100)));
+    const orderDisc = Math.max(0, (sale.discountMinor ?? 0) - lineDiscs.reduce((a, d) => a + d, 0));
+    sale.lines.forEach((l, i) => {
+      const value = l.unitPriceMinor * l.quantity;
+      const disc = (lineDiscs[i] ?? 0) + (gross > 0 ? Math.round((orderDisc * value) / gross) : 0);
+      const cur = topMap.get(l.name) ?? { qty: 0, rev: 0, disc: 0 };
+      topMap.set(l.name, { qty: cur.qty + l.quantity, rev: cur.rev + value - disc, disc: cur.disc + disc });
+    });
+  }
   const soldProducts = [...topMap.entries()].sort((a, b) => b[1].rev - a[1].rev);
   const activeLabel = NAV.find((n) => n.key === active)?.label ?? 'Report';
 
@@ -678,17 +841,20 @@ export function ReportingPage() {
               </div>
               <div className="rc-scroll">
                 <div className="rc-table">
-                  <div className="rc-head rc-real">
+                  <div className="rc-head rc-real rc-11">
                     <span>Register</span><span className="r">#</span><span>Time Opened</span><span>Time Closed ▾</span>
-                    <span className="r">Opening Float</span><span className="r">Expected</span><span className="r">Counted</span><span className="r">Variance</span>
+                    <span className="r">Opening Float</span><span className="r">Cash</span><span className="r">Store Credit</span><span className="r">Total</span><span className="r">Expected</span><span className="r">Counted</span><span className="r">Variance</span>
                   </div>
                   {pageRows.map((r, i) => (
-                    <div key={`${r.num}-${r.opened}`} className={`rc-row rc-real ${i % 2 ? 'alt' : ''}`}>
+                    <div key={`${r.num}-${r.opened}`} className={`rc-row rc-real rc-11 ${i % 2 ? 'alt' : ''}`}>
                       <span className="rc-reg">Main Register</span>
                       <span className="r">{r.num}</span>
                       <span>{fmtDateTime(new Date(r.opened))}</span>
                       <span className={r.open ? 'rc-open' : ''}>{r.open ? 'Still open' : fmtDateTime(new Date(r.closed!))}</span>
                       <span className="r">{fmt(r.openingFloat)}</span>
+                      <span className="r">{fmt(r.cash)}</span>
+                      <span className="r">{fmt(r.storeCredit)}</span>
+                      <span className="r">{fmt(r.total)}</span>
                       <span className="r">{r.expected === null ? '-' : fmt(r.expected)}</span>
                       <span className="r">{r.counted === null ? '-' : fmt(r.counted)}</span>
                       <span className={`r ${r.variance === null || r.variance === 0 ? '' : r.variance < 0 ? 'var-neg' : 'var-pos'}`}>
@@ -836,9 +1002,19 @@ export function ReportingPage() {
             <>
               <h1 className="page-title">Inventory report</h1>
               <div className="sh-tabs">
-                <button className={`sh-tab ${invTab === 'summary' ? 'active' : ''}`} onClick={() => setInvTab('summary')}>Summary</button>
-                <button className={`sh-tab ${invTab === 'replenishment' ? 'active' : ''}`} onClick={() => setInvTab('replenishment')}>Replenishment</button>
-                <button className={`sh-tab ${invTab === 'performance' ? 'active' : ''}`} onClick={() => setInvTab('performance')}>Performance</button>
+                {(
+                  [
+                    ['turns', 'Inventory turns'],
+                    ['summary', 'Summary'],
+                    ['replenishment', 'Replenishment'],
+                    ['performance', 'Performance'],
+                    ['outofstock', 'Recently out of stock'],
+                    ['sellthrough', 'Sell through'],
+                    ['dusty', 'Dusty inventory'],
+                  ] as [typeof invTab, string][]
+                ).map(([k, label]) => (
+                  <button key={k} className={`sh-tab ${invTab === k ? 'active' : ''}`} onClick={() => setInvTab(k)}>{label}</button>
+                ))}
               </div>
               <div className="rep-band"><span>Get an overview of inventory and its performance over time.</span></div>
               {invTab === 'summary' ? (
@@ -907,77 +1083,197 @@ export function ReportingPage() {
                   </div>
                 </>
               ) : (
-                <div className="placeholder-card">
-                  <div className="placeholder-icon">📦</div>
-                  <div className="placeholder-title">{invTab === 'replenishment' ? 'Replenishment' : 'Performance'}</div>
-                  <div className="placeholder-hint">Run a report to see {invTab} data for this period.</div>
-                </div>
+                (() => {
+                  const cols: Record<Exclude<typeof invTab, 'summary'>, { hint: string; head: string[]; rows: (typeof invExtra.turns) ; cells: (r: (typeof invExtra.turns)[number]) => (string | number)[]; empty: string }> = {
+                    turns: { hint: 'How many times each product’s stock has sold through this month: cost of goods sold ÷ value of stock on hand.', head: ['Cost of goods sold', 'Inventory value', 'Turns'], rows: invExtra.turns, cells: (r) => [fmt(r.cogs), fmt(r.stockValue), r.turns === Infinity ? '∞' : r.turns], empty: 'No products to report on.' },
+                    replenishment: { hint: 'Products at or below their reorder point. Order them from Inventory → Stock control.', head: ['Stock on hand', 'Reorder point', 'Reorder quantity', 'On order'], rows: invExtra.replenishment, cells: (r) => [r.stock, r.reorderAt ?? '—', r.reorderQty ?? '—', r.onOrder], empty: 'Nothing needs reordering — every tracked product is above its reorder point.' },
+                    performance: { hint: 'Revenue, gross profit and margin per product this month.', head: ['Items sold', 'Revenue', 'Gross profit', 'Margin'], rows: invExtra.performance, cells: (r) => [r.qty, fmt(r.rev), fmt(r.profit), `${r.margin}%`], empty: 'No products to report on.' },
+                    outofstock: { hint: 'Active products with no stock on hand, most recently sold first.', head: ['Stock on hand', 'Last sold', 'Sold this month', 'On order'], rows: invExtra.outOfStock, cells: (r) => [r.stock, r.lastSold ? new Date(r.lastSold).toLocaleDateString() : 'Never', r.qty, r.onOrder], empty: 'Nothing is out of stock.' },
+                    sellthrough: { hint: 'Units sold this month as a share of units sold plus units still on hand.', head: ['Sold this month', 'Stock on hand', 'Sell through'], rows: invExtra.sellThrough, cells: (r) => [r.qty, r.stock, `${r.sellThrough}%`], empty: 'No products to report on.' },
+                    dusty: { hint: 'Stock that hasn’t sold in the last 90 days, by value tied up.', head: ['Stock on hand', 'Inventory value', 'Last sold'], rows: invExtra.dusty, cells: (r) => [r.stock, fmt(r.stockValue), r.lastSold ? new Date(r.lastSold).toLocaleDateString() : 'Never'], empty: 'No dusty inventory — everything in stock has sold recently.' },
+                  };
+                  const c = cols[invTab as Exclude<typeof invTab, 'summary'>];
+                  return (
+                    <>
+                      <div className="rep-toolbar">
+                        <span className="rep-hint">{c.hint}</span>
+                        <span className="rlink" onClick={() => downloadCSV(`inventory-${invTab}.csv`, [['Product', 'SKU', ...c.head], ...c.rows.map((r) => [r.name, r.sku, ...c.cells(r).map(String)])])}>⤓ Export report…</span>
+                      </div>
+                      <div className="ir-table">
+                        <div className={`ir-head ir-cols-${c.head.length + 1}`}>
+                          <span className="cth-s"><span className="cth-label">Product</span></span>
+                          {c.head.map((h) => <span key={h} className="r">{h}</span>)}
+                        </div>
+                        {c.rows.length === 0 ? (
+                          <div className="rep-empty">{c.empty}</div>
+                        ) : (
+                          c.rows.map((r) => (
+                            <div key={r.id} className={`ir-row ir-cols-${c.head.length + 1}`}>
+                              <span className="ir-name">
+                                <span className="rt-thumb">{r.emoji}</span>
+                                <span><span className="rlink">{r.name}</span><br /><span className="prod-sku">{r.sku}{r.supplier ? ` · ${r.supplier}` : ''}</span></span>
+                              </span>
+                              {c.cells(r).map((v, i) => <span key={i} className="r">{v}</span>)}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </>
+                  );
+                })()
               )}
             </>
           ) : active === 'sales' ? (
             <>
               <h1 className="page-title">Sales report</h1>
+              <div className="sh-tabs">
+                <button className={`sh-tab ${salesTab === 'summary' ? 'active' : ''}`} onClick={() => setSalesTab('summary')}>Summary</button>
+                <button className={`sh-tab ${salesTab === 'individual' ? 'active' : ''}`} onClick={() => setSalesTab('individual')}>Individual performance</button>
+                <button className={`sh-tab ${salesTab === 'hour' ? 'active' : ''}`} onClick={() => setSalesTab('hour')}>Sales by hour of day</button>
+              </div>
               <div className="rep-band"><span>Get an overview of how your sales are performing.</span></div>
               <div className="rep-filter">
-                <div className="rep-fg">
-                  <label>Report type</label>
-                  <select value={salesReport} onChange={(e) => setSalesReport(e.target.value)}>
-                    <option>Sales summary</option><option>Sales by product</option><option>Sales by outlet</option>
-                  </select>
-                </div>
-                <div className="rep-fg">
-                  <label>Measure</label>
-                  <select value={salesMeasure} onChange={(e) => setSalesMeasure(e.target.value)}>
-                    <option>Revenue</option><option>Profit</option><option>Tax</option>
-                  </select>
-                </div>
+                {salesTab === 'summary' && (
+                  <>
+                    <div className="rep-fg">
+                      <label>Report type</label>
+                      <select value={salesReport} onChange={(e) => setSalesReport(e.target.value)}>
+                        <option>Sales summary</option><option>Sales by product</option><option>Sales by outlet</option>
+                      </select>
+                    </div>
+                    <div className="rep-fg">
+                      <label>Measure</label>
+                      <select value={salesMeasure} onChange={(e) => setSalesMeasure(e.target.value)}>
+                        <option>Revenue</option><option>Profit</option><option>Tax</option>
+                      </select>
+                    </div>
+                  </>
+                )}
                 <div className="rep-fg">
                   <label>Date range</label>
                   <DateRangeField value={salesRange} onApply={setSalesRange} />
                 </div>
-                <div className="rep-fg">
-                  <label>Comparison</label>
-                  <select value={salesComparison} onChange={(e) => setSalesComparison(e.target.value)}>
-                    <option>No comparison</option><option>Previous period</option><option>Previous year</option>
-                  </select>
-                </div>
+                {salesTab === 'summary' && (
+                  <div className="rep-fg">
+                    <label>Comparison</label>
+                    <select value={salesComparison} onChange={(e) => setSalesComparison(e.target.value)}>
+                      <option>No comparison</option><option>Previous period</option><option>Previous year</option>
+                    </select>
+                  </div>
+                )}
               </div>
               <div className="dash-morefilters"><span className="rlink">More filters</span></div>
               <div className="rep-toolbar">
-                <span className="rlink">⇄ Format results</span>
-                <span className="rlink" onClick={() => downloadCSV('sales-report.csv', [['Sales summary', 'Revenue', 'Cost of goods sold', 'Gross profit', 'Margin (%)', 'Tax'], ['Totals', fmt(salesMetrics.revenue), fmt(salesMetrics.cogs), fmt(salesMetrics.profit), `${salesMetrics.margin}%`, fmt(salesMetrics.tax)]])}>⤓ Export report…</span>
+                <span className="rep-actions-wrap">
+                  <span className="rlink" onClick={() => setActionsOpen((o) => !o)}>Actions… ▾</span>
+                  {actionsOpen && (
+                    <span className="rep-actions-menu" onMouseLeave={() => setActionsOpen(false)}>
+                      <button onClick={() => { setActionsOpen(false); downloadCSV('sales-report.csv', salesTab === 'summary' ? [['Sales summary', 'Revenue', 'Cost of goods sold', 'Gross profit', 'Margin (%)', 'Tax'], ['Totals', fmt(salesMetrics.revenue), fmt(salesMetrics.cogs), fmt(salesMetrics.profit), `${salesMetrics.margin}%`, fmt(salesMetrics.tax)]] : salesTab === 'individual' ? [['User', 'Revenue', 'Sale count', 'Items sold', 'Avg. sale value', 'Gross profit'], ...salesByUser.map(([u, v]) => [u, fmt(v.rev), String(v.count), String(v.items), fmt(v.count ? Math.round(v.rev / v.count) : 0), fmt(v.profit)])] : [['Hour', 'Revenue', 'Sale count', 'Items sold'], ...salesByHour.map((h) => [`${h.hour}:00`, fmt(h.rev), String(h.count), String(h.items)])]); }}>Export CSV</button>
+                      <button onClick={() => { setActionsOpen(false); window.print(); }}>Print</button>
+                      <button onClick={() => { setActionsOpen(false); setShareModal({ report: 'Sales report', recipients: '' }); }}>Share report</button>
+                    </span>
+                  )}
+                </span>
+                <span className="pe-seg" role="group" aria-label="View">
+                  <button type="button" className={salesView === 'table' ? 'active' : ''} onClick={() => setSalesView('table')}>Table</button>
+                  <button type="button" className={salesView === 'chart' ? 'active' : ''} onClick={() => setSalesView('chart')}>Chart</button>
+                </span>
               </div>
-              <div className="sr-table">
-                <div className="sr-grouphead"><span /><span className="rpt-year">{salesParsedRange.start.getFullYear()}</span><span className="rpt-total">TOTAL</span></div>
-                <div className="sr-head">
-                  <span>Sales summary</span>
-                  <span className="r">{dayHeaderLabel}</span>
-                  <span className="r ps-sortable">Revenue <SortGlyph /></span>
-                  <span className="r ps-sortable">Cost of goods sold <SortGlyph /></span>
-                  <span className="r ps-sortable">Gross profit <SortGlyph /></span>
-                  <span className="r ps-sortable">Margin (%) <SortGlyph /></span>
-                  <span className="r ps-sortable">Tax <SortGlyph /></span>
+              {salesView === 'chart' ? (
+                <div className="rep-table wide">
+                  <div className="rep-table-h">Revenue by day</div>
+                  {salesByDay.every((d) => d.rev === 0) ? (
+                    <div className="rep-empty">No data available for this period.</div>
+                  ) : (
+                    <div className="rep-bars">
+                      {salesByDay.map((d) => {
+                        const max = Math.max(...salesByDay.map((x) => x.rev), 1);
+                        return (
+                          <div key={d.label} className="rep-bar-col" title={`${d.label}: ${fmt(d.rev)}`}>
+                            <div className="rep-bar" style={{ height: `${Math.max(2, (d.rev / max) * 100)}%` }} />
+                            <span className="rep-bar-l">{d.label}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
-                <div className="sr-row totals">
-                  <span>Totals</span>
-                  <span className="r">{fmt(salesMetrics.revenue)}</span>
-                  <span className="r">{fmt(salesMetrics.revenue)}</span>
-                  <span className="r">{fmt(salesMetrics.cogs)}</span>
-                  <span className="r">{fmt(salesMetrics.profit)}</span>
-                  <span className="r">{salesMetrics.margin}%</span>
-                  <span className="r">{fmt(salesMetrics.tax)}</span>
-                </div>
-                <div className="sr-breakdown">
-                  <span className="sr-vlabel">TOTALS BY DATE RANGE</span>
-                  <div className="sr-blist">
-                    <div className="sr-brow"><span>Revenue</span><span className="r">{fmt(salesMetrics.revenue)}</span></div>
-                    <div className="sr-brow"><span>Cost of goods sold</span><span className="r">{fmt(salesMetrics.cogs)}</span></div>
-                    <div className="sr-brow"><span>Gross profit</span><span className="r">{fmt(salesMetrics.profit)}</span></div>
-                    <div className="sr-brow"><span>Margin (%)</span><span className="r">{salesMetrics.margin}%</span></div>
-                    <div className="sr-brow"><span>Tax</span><span className="r">{fmt(salesMetrics.tax)}</span></div>
+              ) : salesTab === 'summary' ? (
+                <div className="sr-table">
+                  <div className="sr-grouphead"><span /><span className="rpt-year">{salesParsedRange.start.getFullYear()}</span><span className="rpt-total">TOTAL</span></div>
+                  <div className="sr-head">
+                    <span>Sales summary</span>
+                    <span className="r">{dayHeaderLabel}</span>
+                    <span className="r ps-sortable">Revenue <SortGlyph /></span>
+                    <span className="r ps-sortable">Cost of goods sold <SortGlyph /></span>
+                    <span className="r ps-sortable">Gross profit <SortGlyph /></span>
+                    <span className="r ps-sortable">Margin (%) <SortGlyph /></span>
+                    <span className="r ps-sortable">Tax <SortGlyph /></span>
+                  </div>
+                  <div className="sr-row totals">
+                    <span>Totals</span>
+                    <span className="r">{fmt(salesMetrics.revenue)}</span>
+                    <span className="r">{fmt(salesMetrics.revenue)}</span>
+                    <span className="r">{fmt(salesMetrics.cogs)}</span>
+                    <span className="r">{fmt(salesMetrics.profit)}</span>
+                    <span className="r">{salesMetrics.margin}%</span>
+                    <span className="r">{fmt(salesMetrics.tax)}</span>
+                  </div>
+                  <div className="sr-breakdown">
+                    <span className="sr-vlabel">TOTALS BY DATE RANGE</span>
+                    <div className="sr-blist">
+                      <div className="sr-brow"><span>Revenue</span><span className="r">{fmt(salesMetrics.revenue)}</span></div>
+                      <div className="sr-brow"><span>Cost of goods sold</span><span className="r">{fmt(salesMetrics.cogs)}</span></div>
+                      <div className="sr-brow"><span>Gross profit</span><span className="r">{fmt(salesMetrics.profit)}</span></div>
+                      <div className="sr-brow"><span>Margin (%)</span><span className="r">{salesMetrics.margin}%</span></div>
+                      <div className="sr-brow"><span>Tax</span><span className="r">{fmt(salesMetrics.tax)}</span></div>
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : salesTab === 'individual' ? (
+                <div className="rep-table wide">
+                  <div className="rep-table-h">Individual performance</div>
+                  <div className="tsp-head">
+                    <span>User</span>
+                    <span className="r">Revenue</span>
+                    <span className="r">Sale count</span>
+                    <span className="r">Items sold</span>
+                    <span className="r">Avg. sale value</span>
+                    <span className="r">Gross profit</span>
+                  </div>
+                  {salesByUser.length === 0 ? (
+                    <div className="rep-empty">No data available for this period.</div>
+                  ) : (
+                    salesByUser.map(([name, v]) => (
+                      <div key={name} className="tsp-row">
+                        <span className="rlink">{name}</span>
+                        <span className="r">{fmt(v.rev)}</span>
+                        <span className="r">{v.count}</span>
+                        <span className="r">{v.items}</span>
+                        <span className="r">{fmt(v.count ? Math.round(v.rev / v.count) : 0)}</span>
+                        <span className="r">{fmt(v.profit)}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              ) : (
+                <div className="rep-table wide">
+                  <div className="rep-table-h">Sales by hour of day</div>
+                  <div className="cm-head"><span>Hour</span><span>Revenue</span><span>Sale count</span><span>Items sold</span></div>
+                  {salesByHour.every((h) => h.count === 0) ? (
+                    <div className="rep-empty">No data available for this period.</div>
+                  ) : (
+                    salesByHour.filter((h) => h.count > 0 || (h.hour >= 7 && h.hour <= 21)).map((h) => (
+                      <div key={h.hour} className="cm-row">
+                        <span>{h.hour % 12 || 12}{h.hour >= 12 ? ' PM' : ' AM'}</span>
+                        <span>{fmt(h.rev)}</span>
+                        <span>{h.count}</span>
+                        <span>{h.items}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </>
           ) : active === 'payment' ? (
             <>
@@ -1104,8 +1400,10 @@ export function ReportingPage() {
             </>
           ) : active === 'user' ? (
             (() => {
+              const range = parseRange(userRange);
+              const inRange = timeEntries.filter((t) => t.clockIn >= range.start.getTime() && t.clockIn <= range.end.getTime());
               const filteredUsers = staffUsers
-                .map((u) => ({ disp: u.name, email: u.email, init: initials(u.name), av: u.av }))
+                .map((u) => ({ id: u.id, disp: u.name, email: u.email, init: initials(u.name), av: u.av, entries: inRange.filter((t) => t.userName === u.name).sort((a, b) => b.clockIn - a.clockIn) }))
                 .filter(
                   (u) => userSearch.trim() === '' || u.disp.toLowerCase().includes(userSearch.toLowerCase()) || u.email.toLowerCase().includes(userSearch.toLowerCase()),
                 )
@@ -1139,7 +1437,7 @@ export function ReportingPage() {
                   )}
                   <div className="disp-row">
                     <span>Displaying {filteredUsers.length} user{filteredUsers.length === 1 ? '' : 's'}</span>
-                    <span className="rlink" onClick={() => downloadCSV('user-time-cards.csv', [['User', 'Email', 'Total worked hours'], ...filteredUsers.map((u) => [u.disp, u.email, '0 min'])])}>⤓ Export list</span>
+                    <span className="rlink" onClick={() => downloadCSV('user-time-cards.csv', [['User', 'Email', 'Clock in', 'Clock out', 'Minutes'], ...filteredUsers.flatMap((u) => (u.entries.length ? u.entries.map((t) => [u.disp, u.email, new Date(t.clockIn).toISOString(), t.clockOut ? new Date(t.clockOut).toISOString() : 'Still clocked in', String(minutesWorked([t]))]) : [[u.disp, u.email, '', '', '0']]))])}>⤓ Export list</span>
                   </div>
                   <div className="ur-table">
                     <div className="ur-head">
@@ -1147,13 +1445,34 @@ export function ReportingPage() {
                       <span className="r">Total worked hours</span>
                     </div>
                     {filteredUsers.map((u) => (
-                      <div key={u.email} className="ur-row">
-                        <span className="ur-user">
-                          <span className="ur-chev">›</span>
-                          <span className="cust-av" style={{ background: u.av }}>{u.init}</span>
-                          <span><b>{u.disp}</b><br /><span className="cust-code">{u.email}</span></span>
-                        </span>
-                        <span className="r">0 min</span>
+                      <div key={u.email}>
+                        <div className="ur-row" onClick={() => setUserExpanded((e) => (e === u.id ? null : u.id))} style={{ cursor: 'pointer' }}>
+                          <span className="ur-user">
+                            <span className="ur-chev">{userExpanded === u.id ? '▾' : '›'}</span>
+                            <span className="cust-av" style={{ background: u.av }}>{u.init}</span>
+                            <span><b>{u.disp}</b><br /><span className="cust-code">{u.email}</span></span>
+                          </span>
+                          <span className="r">{fmtMinutes(minutesWorked(u.entries))}{u.entries.some((t) => t.clockOut === null) ? ' · clocked in' : ''}</span>
+                        </div>
+                        {userExpanded === u.id && (
+                          <div className="ur-entries">
+                            {u.entries.length === 0 ? (
+                              <div className="rep-empty">No time cards in this period. Users clock in and out from their profile menu.</div>
+                            ) : (
+                              <>
+                                <div className="cm-head"><span>Clock in</span><span>Clock out</span><span>Duration</span><span /></div>
+                                {u.entries.map((t) => (
+                                  <div key={t.id} className="cm-row">
+                                    <span>{fmtDateTime(new Date(t.clockIn))}</span>
+                                    <span>{t.clockOut ? fmtDateTime(new Date(t.clockOut)) : <span className="tx-badge open">Clocked in</span>}</span>
+                                    <span>{fmtMinutes(minutesWorked([t]))}</span>
+                                    <span className="r"><span className="rlink" onClick={() => deleteTimeEntry(t.id)}>Delete</span></span>
+                                  </div>
+                                ))}
+                              </>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1183,9 +1502,9 @@ export function ReportingPage() {
                   className="rlink"
                   onClick={() =>
                     downloadCSV('tax-report.csv', [
-                      ['Tax', 'Rate', 'Taxable sales', 'Tax collected', 'Total incl. tax'],
-                      ...taxRows.map((r) => [r.label, `${r.ratePct}%`, fmt(r.taxable), fmt(r.tax), fmt(r.taxable + r.tax)]),
-                      ['Totals', '', fmt(taxTotals.taxable), fmt(taxTotals.tax), fmt(taxTotals.taxable + taxTotals.tax)],
+                      ['Tax code', 'Rate', 'Tax', 'Revenue (excl. tax)', 'Total incl. tax'],
+                      ...taxRows.map((r) => [r.label, `${r.ratePct}%`, fmt(r.tax), fmt(r.taxable), fmt(r.taxable + r.tax)]),
+                      ['Totals', '', fmt(taxTotals.tax), fmt(taxTotals.taxable), fmt(taxTotals.taxable + taxTotals.tax)],
                     ])
                   }
                 >
@@ -1199,7 +1518,7 @@ export function ReportingPage() {
                 <div className="gc-stat"><span>Effective rate</span><b>{taxTotals.taxable > 0 ? `${(Math.round((taxTotals.tax / taxTotals.taxable) * 10000) / 100).toFixed(2)}%` : '0%'}</b></div>
               </div>
               <div className="cm-table">
-                <div className="cm-head"><span>Tax</span><span>Rate</span><span>Taxable sales</span><span>Tax collected</span></div>
+                <div className="cm-head"><span>TAX CODE</span><span>RATE</span><span>TAX</span><span>REVENUE (EXCL. TAX)</span></div>
                 {taxRows.length === 0 ? (
                   <div className="cm-empty">No data available for this period</div>
                 ) : (
@@ -1208,18 +1527,43 @@ export function ReportingPage() {
                       <div key={r.label} className="cm-row">
                         <span>{r.label}<span className="cm-note">{r.count} sale{r.count === 1 ? '' : 's'}</span></span>
                         <span>{r.ratePct}%</span>
-                        <span>{fmt(r.taxable)}</span>
                         <span>{fmt(r.tax)}</span>
+                        <span>{fmt(r.taxable)}</span>
                       </div>
                     ))}
                     <div className="cm-row totals">
                       <span>Totals</span>
                       <span />
-                      <span>{fmt(taxTotals.taxable)}</span>
                       <span>{fmt(taxTotals.tax)}</span>
+                      <span>{fmt(taxTotals.taxable)}</span>
                     </div>
                   </>
                 )}
+              </div>
+            </>
+          ) : active === 'shared' ? (
+            <>
+              <h1 className="page-title">Shared reports</h1>
+              <div className="rep-band">
+                <span>Reports you’ve shared with your team by email, and who receives them.</span>
+                <button className="btn-p" onClick={() => { setShareModal({ report: 'Sales report', recipients: '' }); setShareError(''); }}>Share a report</button>
+              </div>
+              <div className="atable">
+                <div className="inv-thead shr4">
+                  <span className="s">Report</span>
+                  <span className="s">Owner</span>
+                  <span className="s">Recipients</span>
+                  <span className="s">Shared</span>
+                </div>
+                {sharedReports.length === 0 && <div className="ct-empty">No shared reports yet. Share a report to send its link to colleagues.</div>}
+                {sharedReports.map((r) => (
+                  <div key={r.id} className="inv-row shr4">
+                    <span className="strong">{r.report}</span>
+                    <span>{r.owner}</span>
+                    <span>{r.recipients.join(', ')}</span>
+                    <span>{new Date(r.createdAt).toLocaleDateString()} · <span className="rlink" onClick={() => unshareReport(r.id)}>Stop sharing</span></span>
+                  </div>
+                ))}
               </div>
             </>
           ) : active !== 'dashboard' ? (
@@ -1313,7 +1657,7 @@ export function ReportingPage() {
                       </span>
                       <span className="r">{fmt(v.rev)}</span>
                       <span className="r">{v.qty}</span>
-                      <span className="r">$0.00</span>
+                      <span className="r">{fmt(v.disc)}</span>
                       <span className="r ps-trend"><Sparkline data={trendMap.get(name) ?? [0, 0, 0, 0, 0, 0, 0]} height={26} /></span>
                     </div>
                   ))
@@ -1349,6 +1693,30 @@ export function ReportingPage() {
           )}
         </div>
       </main>
+      {shareModal && (
+        <div className="pm-overlay" onClick={() => setShareModal(null)}>
+          <div className="pm reg-open" onClick={(e) => e.stopPropagation()} role="dialog">
+            <div className="pm-head">
+              <h2>Share report</h2>
+              <button className="pm-close" onClick={() => setShareModal(null)} aria-label="Close">×</button>
+            </div>
+            <form className="reg-open-body" onSubmit={(e) => { e.preventDefault(); shareNow(); }}>
+              {shareError && <div className="pe-error" role="alert">{shareError}</div>}
+              <label className="reg-open-field">
+                <span>Report</span>
+                <select value={shareModal.report} onChange={(e) => setShareModal({ ...shareModal, report: e.target.value })}>
+                  {NAV.filter((n) => n.key !== 'shared').map((n) => <option key={n.key}>{n.label}</option>)}
+                </select>
+              </label>
+              <label className="reg-open-field">
+                <span>Recipients <span className="pe-hint">Email addresses, separated by commas</span></span>
+                <input value={shareModal.recipients} autoFocus onChange={(e) => { setShareModal({ ...shareModal, recipients: e.target.value }); setShareError(''); }} placeholder="name@domain.com, other@domain.com" />
+              </label>
+              <button className="pm-complete" type="submit">Share report</button>
+            </form>
+          </div>
+        </div>
+      )}
     </>
   );
 }

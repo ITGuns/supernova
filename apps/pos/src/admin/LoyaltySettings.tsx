@@ -32,15 +32,27 @@ export function LoyaltySettings() {
       <>
         <h1 className="page-title">Loyalty</h1>
         <div className="page-subbar">Manage settings for your Retail POS Loyalty program.</div>
-        <div className="placeholder-card">
-          <div className="placeholder-icon">🎁</div>
-          <div className="placeholder-title">Loyalty is disabled</div>
-          <div className="placeholder-hint">
-            Turn on Loyalty to reward customers for every purchase, in-store and online.
+        <div className="loy-hero">
+          <div className="loy-hero-h">Enable Loyalty to grow repeat business</div>
+          <div className="loy-hero-t">Reward customers with a percentage of every sale to spend in-store or online, and watch them come back.</div>
+          <button className="btn-p" onClick={() => set({ loyaltyEnabled: true })}>Enable Loyalty</button>
+        </div>
+        <div className="loy-cards">
+          <div className="loy-card">
+            <div className="loy-card-ic">🎁</div>
+            <div className="loy-card-h">Reward every purchase</div>
+            <div className="loy-card-t">Customers earn a set percentage of each sale as Loyalty dollars, in-store and online.</div>
           </div>
-          <button className="btn-p" style={{ marginTop: 16 }} onClick={() => set({ loyaltyEnabled: true })}>
-            Enable Loyalty
-          </button>
+          <div className="loy-card">
+            <div className="loy-card-ic">🔁</div>
+            <div className="loy-card-h">Bring customers back</div>
+            <div className="loy-card-t">Balances are redeemed at the register like cash, so shoppers have a reason to return.</div>
+          </div>
+          <div className="loy-card">
+            <div className="loy-card-ic">📈</div>
+            <div className="loy-card-h">Track what works</div>
+            <div className="loy-card-t">See Loyalty earned and redeemed in reporting and on each customer’s profile.</div>
+          </div>
         </div>
       </>
     );

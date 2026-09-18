@@ -1,5 +1,5 @@
 import { useRef, useState, type ChangeEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { ContextNav, type ContextItem } from '../shell/ContextNav';
 import { useSettings } from '../store/settingsStore';
 import { useSetup } from '../store/setupStore';
@@ -14,11 +14,14 @@ import { SavedPaymentSettings } from './SavedPaymentSettings';
 import { SecuritySettings } from './SecuritySettings';
 import { StoreCreditSettings } from './StoreCreditSettings';
 import { UsersSettings } from './UsersSettings';
+import { WorkflowsSettings } from './WorkflowsSettings';
+import { FulfillmentSettings } from './FulfillmentSettings';
 
 const NAV: ContextItem[] = [
   { key: 'general', label: 'General' },
   { key: 'billing', label: 'Billing' },
   { key: 'outlets', label: 'Outlets and registers' },
+  { key: 'fulfillments', label: 'Fulfillments' },
   { key: 'inventory', label: 'Inventory' },
   { key: 'devices', label: 'Devices and label printing' },
   { key: 'payments', label: 'Payment types' },
@@ -27,6 +30,7 @@ const NAV: ContextItem[] = [
   { key: 'loyalty', label: 'Loyalty' },
   { key: 'users', label: 'Users' },
   { key: 'security', label: 'Security' },
+  { key: 'workflows', label: 'Workflows' },
   { key: 'apps', label: 'Apps' },
   { key: 'storecredit', label: 'Store credit' },
   { key: 'saved', label: 'Saved payment methods' },
@@ -74,7 +78,8 @@ function Chk({ on, onClick, label, hint }: { on: boolean; onClick: () => void; l
 
 export function SetupPage() {
   const nav = useNavigate();
-  const [active, setActive] = useState('general');
+  const location = useLocation();
+  const [active, setActive] = useState((location.state as { tab?: string } | null)?.tab ?? 'general');
   const [devTab, setDevTab] = useState<'devices' | 'label'>('label');
   const setup = useSetup();
   const storeName = useSettings((s) => s.storeName);
@@ -84,6 +89,8 @@ export function SetupPage() {
   const taxes = useSettings((s) => s.taxes);
   const defaultTaxLabel = useSettings((s) => s.defaultTaxLabel);
   const setDefaultTax = useSettings((s) => s.setDefaultTax);
+  const taxExclusive = useSettings((s) => s.taxExclusive);
+  const setTaxExclusive = useSettings((s) => s.setTaxExclusive);
 
   // On-account: radio choice derived from the store; "limit" stays selected
   // locally while the limit amount is still being typed.
@@ -195,6 +202,7 @@ export function SetupPage() {
                         {taxes.map((o) => <option key={o.id}>{o.label}</option>)}
                       </select>
                     </div>
+                    <Chk on={taxExclusive} onClick={() => setTaxExclusive(!taxExclusive)} label="Tax exclusive display prices" hint="Show prices without tax and add tax at the register. Leave off to keep tax included in the price shown." />
                   </div>
                 </div>
 
@@ -452,6 +460,10 @@ export function SetupPage() {
           )}
 
           {active === 'taxes' && <SalesTaxSettings />}
+
+          {active === 'workflows' && <WorkflowsSettings />}
+
+          {active === 'fulfillments' && <FulfillmentSettings />}
 
           {active === 'payments' && <PaymentTypesSettings />}
 

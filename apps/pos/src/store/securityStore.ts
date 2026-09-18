@@ -12,6 +12,11 @@ interface SecurityState {
   managerAuth: string;
   cashierLogin: string;
   cashierAuth: string;
+  /** Single sign-on: let staff log in with the store's identity provider. */
+  ssoEnabled: boolean;
+  ssoProvider: string;
+  ssoDomain: string;
+  ssoEnforce: boolean;
   set: (patch: Partial<SecurityState>) => void;
 }
 
@@ -26,6 +31,10 @@ export const useSecurity = create<SecurityState>()(
       managerAuth: 'default',
       cashierLogin: 'default',
       cashierAuth: 'default',
+      ssoEnabled: false,
+      ssoProvider: 'Google Workspace',
+      ssoDomain: '',
+      ssoEnforce: false,
       set: (patch) => set(patch),
     }),
     { name: 'nova-security-v2' },

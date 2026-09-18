@@ -18,6 +18,8 @@ export interface Outlet {
   id: string;
   name: string;
   registers: string[];
+  /** Optional address shown on receipts and used for delivery quotes. */
+  address?: string;
 }
 
 export interface ReceiptTemplate {
@@ -73,6 +75,8 @@ export interface SetupState {
   paymentTypes: PaymentType[];
   // Outlets & registers
   outlets: Outlet[];
+  /** Default sales tax per outlet: outlet id → tax option id ('' = store default). */
+  outletTaxes: Record<string, string>;
   receiptTemplates: ReceiptTemplate[];
 
   /** Pull setup config from Supabase. */
@@ -128,6 +132,7 @@ const toRow = (s: SetupState): Record<string, unknown> => ({
   sales_target_minor: s.salesTargetMinor,
   payment_types: s.paymentTypes,
   outlets: s.outlets,
+  ...(hasOutletTaxes ? { outlet_taxes: s.outletTaxes } : {}),
   receipt_templates: s.receiptTemplates,
 });
 
@@ -171,8 +176,12 @@ const fromRow = (r: Record<string, unknown>): Partial<SetupState> => ({
   salesTargetMinor: r.sales_target_minor as number,
   paymentTypes: (r.payment_types as PaymentType[]) ?? [],
   outlets: (r.outlets as Outlet[]) ?? [],
+  outletTaxes: (r.outlet_taxes as Record<string, string> | null) ?? {},
   receiptTemplates: (r.receipt_templates as ReceiptTemplate[]) ?? [],
 });
+
+// Whether setup_config has the outlet_taxes column (migration 0009).
+let hasOutletTaxes = true;
 
 export const useSetup = create<SetupState>()(
   persist(
@@ -218,10 +227,12 @@ export const useSetup = create<SetupState>()(
         { id: 'pt-card', name: 'Credit / Debit card', sub: 'Built-in', icon: '💳' },
       ],
       outlets: [{ id: 'o-main', name: 'Main Outlet', registers: ['Main Register'] }],
+      outletTaxes: {},
       receiptTemplates: [{ id: 'r-default', name: 'Standard receipt' }],
 
       syncFromDb: async () => {
-        const row = await dbSetup.get();
+        const [row, probe] = await Promise.all([dbSetup.get(), dbSetup.hasOutletTaxes()]);
+        if (probe !== null) hasOutletTaxes = probe;
         if (!row) return;
         set(fromRow(row));
       },

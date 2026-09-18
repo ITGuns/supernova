@@ -2,9 +2,14 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { fmt } from '../lib/format';
 import { saleCost, saleRevenue, useCart, type CompletedSale } from '../store/cartStore';
-import { useProducts } from '../store/productStore';
+import { availableOf, useProducts } from '../store/productStore';
 import { useSetup } from '../store/setupStore';
 import { useUsers } from '../store/userStore';
+import { useCustomers } from '../store/customerStore';
+import { useSettings } from '../store/settingsStore';
+import { useFulfillments } from '../store/fulfillmentStore';
+import { countBucket, useInventory } from '../store/inventoryStore';
+import { isCurrentService, useServices } from '../store/serviceStore';
 import { ClipboardGraphic, InventoryGraphic, PartnerLogo, PaymentsGraphic } from './illustrations';
 import { SalesChart } from './SalesChart';
 import '../styles/reporting.css';
@@ -85,6 +90,29 @@ const PERIODS = ['Today', 'This week', 'This month'] as const;
 type Period = (typeof PERIODS)[number];
 
 export function HomePage() {
+  // "Set up your store" checklist — each step is done when the store has the data.
+  const CHECKLIST_KEY = 'nova-home-checklist-dismissed';
+  const [checklistOpen, setChecklistOpen] = useState(() => {
+    try {
+      return localStorage.getItem(CHECKLIST_KEY) !== '1';
+    } catch {
+      return true;
+    }
+  });
+  const dismissChecklist = () => {
+    setChecklistOpen(false);
+    try {
+      localStorage.setItem(CHECKLIST_KEY, '1');
+    } catch {
+      /* ignore */
+    }
+  };
+  const customersCount = useCustomers((s) => s.customers.length);
+  const taxes = useSettings((s) => s.taxes);
+  const paymentTypes = useSetup((s) => s.paymentTypes);
+  const fulfillments = useFulfillments((s) => s.fulfillments);
+  const counts = useInventory((s) => s.counts);
+  const services = useServices((s) => s.services);
   const navigate = useNavigate();
   const allSales = useCart((s) => s.sales);
   const products = useProducts((s) => s.products);
@@ -206,6 +234,27 @@ export function HomePage() {
   const periodLabel =
     period === 'Today' ? 'Today’s sales' : `${period}’s sales`;
 
+  const checklist: { title: string; text: string; done: boolean; to: string; state?: Record<string, string> }[] = [
+    { title: 'Add your products', text: 'Build your catalog by hand or import a spreadsheet.', done: products.length > 0, to: '/catalog' },
+    { title: 'Set up sales tax', text: 'Add the tax rates you charge.', done: taxes.some((t) => t.rateBps > 0), to: '/setup', state: { tab: 'taxes' } },
+    { title: 'Choose payment types', text: 'Cash and card are ready; add Venmo, checks or gift vouchers.', done: paymentTypes.length > 2, to: '/setup', state: { tab: 'payments' } },
+    { title: 'Add your team', text: 'Create a user for each person who sells.', done: users.length > 2, to: '/setup', state: { tab: 'users' } },
+    { title: 'Add a customer', text: 'Keep track of sales history and contact details.', done: customersCount > 0, to: '/customers' },
+    { title: 'Make your first sale', text: 'Open the register and ring up a sale.', done: sales.some((s) => !s.training), to: '/sell' },
+  ];
+  const lowStock = products.filter((p) => p.enabled && p.trackInventory !== false && (p.replenishMethod === 'reorder' ? p.reorderPoint != null && availableOf(p, products) <= p.reorderPoint : p.minQty != null && availableOf(p, products) <= p.minQty)).length;
+  const openSales = sales.filter((s) => s.status === 'Layaway' || s.status === 'On account').length;
+  const openFulfillments = fulfillments.filter((f) => f.status === 'Open').length;
+  const countsDue = counts.filter((c) => countBucket(c) === 'due').length;
+  const openServices = services.filter(isCurrentService).length;
+  const todos: { title: string; text: string; count: number; to: string; state?: Record<string, string> }[] = [
+    ...(openFulfillments ? [{ title: 'Orders to fulfill', text: 'Pack, pickup and delivery orders waiting.', count: openFulfillments, to: '/inventory', state: { tab: 'fulfillments' } }] : []),
+    ...(openSales ? [{ title: 'Sales with a balance owing', text: 'Layaway and on-account sales to continue.', count: openSales, to: '/sell/sales-history' }] : []),
+    ...(lowStock ? [{ title: 'Products to reorder', text: 'At or below their reorder point.', count: lowStock, to: '/inventory' }] : []),
+    ...(countsDue ? [{ title: 'Inventory counts due', text: 'Counts scheduled and ready to start.', count: countsDue, to: '/inventory', state: { tab: 'counts' } }] : []),
+    ...(openServices ? [{ title: 'Services in progress', text: 'Jobs booked for customers.', count: openServices, to: '/services' }] : []),
+  ];
+
   return (
     <main className="admin-main">
       <div className="home2-top">
@@ -250,6 +299,25 @@ export function HomePage() {
       </div>
 
       <div className="home2-body">
+        {checklistOpen && (
+          <div className="home-checklist">
+            <div className="home-sec-h">
+              SET UP YOUR STORE <span className="sec-more rlink" onClick={dismissChecklist}>Dismiss</span>
+            </div>
+            <div className="hc-cards">
+              {checklist.map((c) => (
+                <button key={c.title} className={`hc-card ${c.done ? 'done' : ''}`} onClick={() => navigate(c.to, c.state ? { state: c.state } : undefined)}>
+                  <span className="hc-check">{c.done ? '✓' : ''}</span>
+                  <span className="hc-body">
+                    <b>{c.title}</b>
+                    <span>{c.text}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="hc-progress">{checklist.filter((c) => c.done).length} of {checklist.length} done</div>
+          </div>
+        )}
         {/* Row A — Things to know / Things to do */}
         <div className="home-grid">
           <div className="home-col">
@@ -291,10 +359,22 @@ export function HomePage() {
           </div>
           <div className="home-col narrow">
             <div className="home-sec-h">THINGS TO DO</div>
-            <div className="todo-empty">
-              <ClipboardGraphic />
-              <div>There’s nothing on your to-do list</div>
-            </div>
+            {todos.length === 0 ? (
+              <div className="todo-empty">
+                <ClipboardGraphic />
+                <div>There’s nothing on your to-do list</div>
+              </div>
+            ) : (
+              <div className="todo-list">
+                {todos.map((t) => (
+                  <button key={t.title} className="todo-item" onClick={() => navigate(t.to, t.state ? { state: t.state } : undefined)}>
+                    <span className="todo-count">{t.count}</span>
+                    <span className="todo-body"><b>{t.title}</b><span>{t.text}</span></span>
+                    <span className="todo-chev">›</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

@@ -7,6 +7,8 @@ import '../styles/reporting.css';
 export function OnlinePage() {
   const enabled = useOnline((s) => s.enabled);
   const subdomain = useOnline((s) => s.subdomain);
+  const showroom = useOnline((s) => s.showroom);
+  const showroomTagline = useOnline((s) => s.showroomTagline);
   const set = useOnline((s) => s.set);
   const products = useProducts((s) => s.products);
   const live = products.filter((p) => p.enabled);
@@ -17,7 +19,36 @@ export function OnlinePage() {
       <div className="admin-page">
         <h1 className="page-title">Online</h1>
         <div className="page-subbar">
-          <span className="page-subbar-text">Sell your catalog online with a hosted storefront.</span>
+          <span className="page-subbar-text">Online marketing — reach customers beyond the store with an online store or an AI Showroom.</span>
+        </div>
+
+        <div className="om-cards">
+          <div className={`om-card ${enabled ? 'on' : ''}`}>
+            <div className="om-ic">🛒</div>
+            <div className="om-h">Online store</div>
+            <div className="om-t">A full storefront where customers browse your catalog, pay online and choose pickup or delivery. Stock and prices stay in sync with the register.</div>
+            <ul className="om-list">
+              <li>Sell 24/7 from your existing catalog</li>
+              <li>Orders arrive as fulfillments to pack, pick up or deliver</li>
+              <li>Loyalty, promotions and price books apply online too</li>
+            </ul>
+            <button className="btn-p" onClick={() => set({ enabled: !enabled })}>{enabled ? 'Turn off online store' : 'Turn on online store'}</button>
+          </div>
+          <div className={`om-card ${showroom ? 'on' : ''}`}>
+            <div className="om-ic">✨</div>
+            <div className="om-h">AI Showroom</div>
+            <div className="om-t">A lightweight, shareable page that showcases your best products with generated descriptions and photos — no online payments, customers call, message or visit to buy.</div>
+            <ul className="om-list">
+              <li>Set up in minutes from your active products</li>
+              <li>Share the link on social media and messages</li>
+              <li>Upgrade to the online store whenever you’re ready</li>
+            </ul>
+            <div className="om-field">
+              <input className="set-input" value={showroomTagline} onChange={(e) => set({ showroomTagline: e.target.value })} placeholder="Tagline, e.g. Curated gear for every ride" />
+            </div>
+            <button className="btn-p" onClick={() => set({ showroom: !showroom })}>{showroom ? 'Turn off AI Showroom' : 'Turn on AI Showroom'}</button>
+            {showroom && <div className="online-url">{`https://${subdomain || 'my-store'}.novashop.com/showroom`}</div>}
+          </div>
         </div>
 
         <div className="fin-cards">

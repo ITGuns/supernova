@@ -1,4 +1,9 @@
 import { useRef, useState } from 'react';
+import { EMPTY_CUSTOMER_ADDRESS, EMPTY_CUSTOMER_DETAILS, type CustomerAddress, type CustomerDetails } from '../data/customers';
+import { normaliseDetails } from '../store/customerStore';
+import { useCustomFields } from '../store/customFieldStore';
+import { useSetup } from '../store/setupStore';
+import { MoneyInput } from './NumInput';
 import { useNavigate } from 'react-router-dom';
 import { type CustomerRow } from '../data/customers';
 import { fmt } from '../lib/format';
@@ -80,7 +85,7 @@ export function CustomersPage() {
   const [q, setQ] = useState('');
   const [groupFilter, setGroupFilter] = useState('all');
   const [notice, setNotice] = useState<string | null>(null);
-  const [newGroup, setNewGroup] = useState('');
+  const [newGroup, setNewGroup] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const importFileRef = useRef<HTMLInputElement>(null);
 
@@ -92,7 +97,20 @@ export function CustomersPage() {
   const [editGroup, setEditGroup] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editPhone, setEditPhone] = useState('');
+  const [editDetails, setEditDetails] = useState<CustomerDetails>(() => normaliseDetails(null));
+  const [editLimit, setEditLimit] = useState<number | null>(null);
+  const [editLoyalty, setEditLoyalty] = useState(true);
+  const [modalTab, setModalTab] = useState<'Contact information' | 'Addresses' | 'Additional information' | 'Customer settings'>('Contact information');
+  const [pendingQ, setPendingQ] = useState('');
+  const [pendingGroup, setPendingGroup] = useState('all');
+  const [moreFilters, setMoreFilters] = useState(false);
+  const [balanceFilter, setBalanceFilter] = useState<'all' | 'credit' | 'account' | 'loyalty'>('all');
+  const customFields = useCustomFields((s) => s.fields).filter((f) => f.application === 'Customers');
+  const onAccountEnabled = useSetup((s) => s.onAccountEnabled);
+  const groupCreated = useCustomers((s) => s.groupCreated);
   const isNewCust = editingCustId === 'new';
+  const setAddr = (which: 'physical' | 'postal', patch: Partial<CustomerAddress>) =>
+    setEditDetails((d) => ({ ...d, [which]: { ...d[which], ...patch } }));
 
   const startEdit = (c: CustomerRow) => {
     setEditingCustId(c.id);
@@ -102,6 +120,10 @@ export function CustomersPage() {
     setEditGroup(c.group);
     setEditEmail(c.email || '');
     setEditPhone(c.phone || '');
+    setEditDetails(normaliseDetails(c.details));
+    setEditLimit(c.onAccountLimitMinor ?? null);
+    setEditLoyalty(c.loyaltyEnabled !== false);
+    setModalTab('Contact information');
   };
 
   const startAdd = () => {
@@ -112,6 +134,10 @@ export function CustomersPage() {
     setEditGroup(groups[0] ?? 'All Customers');
     setEditEmail('');
     setEditPhone('');
+    setEditDetails(normaliseDetails(null));
+    setEditLimit(null);
+    setEditLoyalty(true);
+    setModalTab('Contact information');
   };
 
   const saveCustEdit = () => {
@@ -127,6 +153,9 @@ export function CustomersPage() {
         storeCreditMinor: 0,
         loyaltyMinor: 0,
         accountMinor: 0,
+        onAccountLimitMinor: editLimit,
+        loyaltyEnabled: editLoyalty,
+        details: editDetails.postalSameAsPhysical ? { ...editDetails, postal: { ...EMPTY_CUSTOMER_ADDRESS } } : editDetails,
       });
     } else {
       updateCust(editingCustId, {
@@ -136,6 +165,9 @@ export function CustomersPage() {
         group: editGroup,
         email: editEmail,
         phone: editPhone,
+        onAccountLimitMinor: editLimit,
+        loyaltyEnabled: editLoyalty,
+        details: editDetails.postalSameAsPhysical ? { ...editDetails, postal: { ...EMPTY_CUSTOMER_ADDRESS } } : editDetails,
       });
     }
     setEditingCustId(null);
@@ -254,7 +286,8 @@ export function CustomersPage() {
         c.code.toLowerCase().includes(q.toLowerCase()) ||
         (c.email || '').toLowerCase().includes(q.toLowerCase()) ||
         (c.phone || '').toLowerCase().includes(q.toLowerCase())) &&
-      (groupFilter === 'all' || c.group === groupFilter),
+      (groupFilter === 'all' || c.group === groupFilter) &&
+      (balanceFilter === 'all' || (balanceFilter === 'credit' ? c.storeCreditMinor > 0 : balanceFilter === 'loyalty' ? c.loyaltyMinor > 0 : c.accountMinor > 0)),
   );
 
   const deleteCustomer = (id: string) => {
@@ -337,35 +370,57 @@ export function CustomersPage() {
           {active === 'groups' ? (
             <>
               <h1 className="page-title">Groups</h1>
-              <div className="add-bar">
-                <input
-                  className="set-input"
-                  value={newGroup}
-                  onChange={(e) => setNewGroup(e.target.value)}
-                  placeholder="New group name"
-                  style={{ flex: 1 }}
-                />
-                <button
-                  className="btn-p"
-                  disabled={!newGroup.trim()}
-                  onClick={() => {
-                    addGroup(newGroup.trim());
-                    setNewGroup('');
-                  }}
-                >
-                  Add group
-                </button>
+              <div className="subbar-row">
+                <span>
+                  Group customers for reporting purposes and to apply targeted promotions or special offers. <span className="rlink">Need help?</span>
+                </span>
+                <button className="btn-p" onClick={() => setNewGroup((v) => (v === null ? '' : v))}>Add customer group</button>
               </div>
+              {newGroup !== null && (
+                <div className="add-bar">
+                  <input
+                    className="set-input"
+                    value={newGroup}
+                    autoFocus
+                    onChange={(e) => setNewGroup(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newGroup.trim()) {
+                        addGroup(newGroup.trim());
+                        setNewGroup(null);
+                      }
+                      if (e.key === 'Escape') setNewGroup(null);
+                    }}
+                    placeholder="Group name"
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    className="btn-p"
+                    disabled={!newGroup.trim()}
+                    onClick={() => {
+                      addGroup(newGroup.trim());
+                      setNewGroup(null);
+                    }}
+                  >
+                    Add group
+                  </button>
+                  <button className="btn-s" onClick={() => setNewGroup(null)}>Cancel</button>
+                </div>
+              )}
               <div className="atable">
-                <div className="athead grp3">
+                <div className="athead grp4">
                   <span>Name</span>
+                  <span>Date created</span>
                   <span className="r">Number of customers</span>
                   <span />
                 </div>
+                {groups.filter((g) => g !== 'All Customers').length === 0 && (
+                  <div className="ct-empty">You haven’t added any customer groups.</div>
+                )}
                 {groups.map((g) => (
-                  <div key={g} className="arow grp3">
+                  <div key={g} className="arow grp4">
                     <span>{g}</span>
-                    <span className="r">{customers.filter((c) => c.group === g).length}</span>
+                    <span className="ct-muted">{g === 'All Customers' ? 'With store' : groupCreated[g] ? new Date(groupCreated[g]!).toLocaleDateString() : '—'}</span>
+                    <span className="r">{g === 'All Customers' ? customers.length : customers.filter((c) => c.group === g).length}</span>
                     <span className="row-actions">
                       {g !== 'All Customers' && (
                         <span className="ic" style={{ cursor: 'pointer' }} onClick={() => deleteGroup(g)}>
@@ -405,28 +460,78 @@ export function CustomersPage() {
                 </div>
               </div>
 
-              <div className="filter-row">
-                <div className="f-field">
-                  <label>Search for customers</label>
-                  <input
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                    placeholder="Enter name, customer code or contact details"
-                  />
+              <div className="sc-filter-card">
+                <div className="sc-frow">
+                  <div className="f-field">
+                    <label>Search for customers</label>
+                    <input
+                      value={pendingQ}
+                      onChange={(e) => setPendingQ(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          setQ(pendingQ);
+                          setGroupFilter(pendingGroup);
+                        }
+                      }}
+                      placeholder="Enter name, customer code or contact details"
+                    />
+                  </div>
+                  <div className="f-field">
+                    <label>Customer group</label>
+                    <select
+                      className="set-select"
+                      value={pendingGroup}
+                      onChange={(e) => setPendingGroup(e.target.value)}
+                      style={{ height: '38px', minWidth: '180px', background: 'var(--panel)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: '8px', padding: '0 8px' }}
+                    >
+                      <option value="all">All groups</option>
+                      {groups.map((g) => (
+                        <option key={g} value={g}>{g}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {moreFilters && (
+                    <div className="f-field">
+                      <label>Balance</label>
+                      <select
+                        className="set-select"
+                        value={balanceFilter}
+                        onChange={(e) => setBalanceFilter(e.target.value as typeof balanceFilter)}
+                        style={{ height: '38px', minWidth: '180px', background: 'var(--panel)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: '8px', padding: '0 8px' }}
+                      >
+                        <option value="all">Any balance</option>
+                        <option value="credit">Has store credit</option>
+                        <option value="loyalty">Has loyalty balance</option>
+                        <option value="account">Owes on account</option>
+                      </select>
+                    </div>
+                  )}
                 </div>
-                <div className="f-field">
-                  <label>Customer group</label>
-                  <select
-                    className="set-select"
-                    value={groupFilter}
-                    onChange={(e) => setGroupFilter(e.target.value)}
-                    style={{ height: '38px', minWidth: '180px', background: 'var(--panel)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: '8px', padding: '0 8px' }}
+                <div className="sc-factions split">
+                  <span className="sc-links">
+                    <span
+                      className="rlink"
+                      onClick={() => {
+                        setPendingQ('');
+                        setPendingGroup('all');
+                        setQ('');
+                        setGroupFilter('all');
+                        setBalanceFilter('all');
+                      }}
+                    >
+                      Clear filters
+                    </span>
+                    <span className="rlink" onClick={() => setMoreFilters((m) => !m)}>{moreFilters ? 'Less filters' : 'More filters'}</span>
+                  </span>
+                  <button
+                    className="btn-p"
+                    onClick={() => {
+                      setQ(pendingQ);
+                      setGroupFilter(pendingGroup);
+                    }}
                   >
-                    <option value="all">All</option>
-                    {groups.map((g) => (
-                      <option key={g} value={g}>{g}</option>
-                    ))}
-                  </select>
+                    Search
+                  </button>
                 </div>
               </div>
 
@@ -452,6 +557,12 @@ export function CustomersPage() {
                 </div>
               )}
 
+              {customers.length === 0 && (
+                <div className="astate">
+                  <div>Create customer profiles to keep track of sales history and contact information.</div>
+                  <button className="btn-p" onClick={startAdd}>Add customer</button>
+                </div>
+              )}
               <div className="atable">
                 <div className="athead cust2">
                   <span className="c">
@@ -532,6 +643,15 @@ export function CustomersPage() {
                                   <span>Phone</span>
                                   <b>{c.phone}</b>
                                 </div>
+                                {c.details?.company && (
+                                  <div className="cust-p-row"><span>Company</span><b>{c.details.company}</b></div>
+                                )}
+                                {c.details?.physical.street1 && (
+                                  <div className="cust-p-row"><span>Address</span><b>{[c.details.physical.street1, c.details.physical.city, c.details.physical.state, c.details.physical.zip].filter(Boolean).join(', ')}</b></div>
+                                )}
+                                {c.createdAt && (
+                                  <div className="cust-p-row"><span>Customer since</span><b>{new Date(c.createdAt).toLocaleDateString()}</b></div>
+                                )}
                               </>
                             )}
                             {detailTab === 'Store credit' && (
@@ -555,7 +675,7 @@ export function CustomersPage() {
                             {detailTab === 'Notes' && (
                               <div className="cust-p-row">
                                 <span>Notes</span>
-                                <b>—</b>
+                                <b>{c.details?.notes || '—'}</b>
                               </div>
                             )}
                           </div>
@@ -589,98 +709,119 @@ export function CustomersPage() {
 
       {editingCustId !== null && (
         <div className="pm-overlay" onClick={() => setEditingCustId(null)}>
-          <div className="pm" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+          <div className="pm cm-modal" onClick={(e) => e.stopPropagation()}>
             <div className="pm-head">
               <h2>{isNewCust ? 'Add customer' : 'Edit customer profile'}</h2>
               <button className="pm-close" onClick={() => setEditingCustId(null)} aria-label="Close">
                 ×
               </button>
             </div>
-            <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <div className="set-field" style={{ flex: 1 }}>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                    First name
+            <div className="sh-tabs small cm-tabs">
+              {(['Contact information', 'Addresses', 'Additional information', 'Customer settings'] as const).map((t) => (
+                <button key={t} className={`sh-tab ${modalTab === t ? 'active' : ''}`} onClick={() => setModalTab(t)} type="button">{t}</button>
+              ))}
+            </div>
+            <div className="cm-body">
+              {modalTab === 'Contact information' && (
+                <div className="cm-grid">
+                  <label className="cm-field"><span>First name</span><input className="set-input" value={editFirst} autoFocus onChange={(e) => setEditFirst(e.target.value)} placeholder="First name" /></label>
+                  <label className="cm-field"><span>Last name</span><input className="set-input" value={editLast} onChange={(e) => setEditLast(e.target.value)} placeholder="Last name" /></label>
+                  <label className="cm-field"><span>Email</span><input className="set-input" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} placeholder="name@domain.com" /></label>
+                  <label className="cm-field"><span>Phone</span><input className="set-input" value={editPhone} onChange={(e) => setEditPhone(e.target.value)} placeholder="+1 555 0100" /></label>
+                  <label className="cm-field"><span>Company</span><input className="set-input" value={editDetails.company} onChange={(e) => setEditDetails({ ...editDetails, company: e.target.value })} /></label>
+                  <label className="cm-field"><span>Customer code</span><input className="set-input" value={editCode} onChange={(e) => setEditCode(e.target.value)} placeholder={isNewCust ? 'Leave blank to generate' : 'e.g. vip-12'} /></label>
+                  <label className="cm-field">
+                    <span>Customer group</span>
+                    <select className="set-select" value={editGroup} onChange={(e) => setEditGroup(e.target.value)}>
+                      {!groups.includes(editGroup) && editGroup && <option value={editGroup}>{editGroup}</option>}
+                      {groups.map((g) => <option key={g} value={g}>{g}</option>)}
+                    </select>
                   </label>
-                  <input
-                    className="set-input"
-                    value={editFirst}
-                    onChange={(e) => setEditFirst(e.target.value)}
-                    placeholder="First Name"
-                    style={{ width: '100%', boxSizing: 'border-box' }}
-                  />
-                </div>
-                <div className="set-field" style={{ flex: 1 }}>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                    Last name
+                  <label className="cm-field cm-check">
+                    <input type="checkbox" checked={editDetails.emailMarketing} onChange={(e) => setEditDetails({ ...editDetails, emailMarketing: e.target.checked })} />
+                    <span>Customer has opted in to marketing emails</span>
                   </label>
-                  <input
-                    className="set-input"
-                    value={editLast}
-                    onChange={(e) => setEditLast(e.target.value)}
-                    placeholder="Last Name"
-                    style={{ width: '100%', boxSizing: 'border-box' }}
-                  />
                 </div>
-              </div>
-
-              <div className="set-field" style={{ maxWidth: '100%' }}>
-                <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                  Customer code
-                </label>
-                <input
-                  className="set-input"
-                  value={editCode}
-                  onChange={(e) => setEditCode(e.target.value)}
-                  placeholder={isNewCust ? 'Leave blank to generate' : 'e.g. vip-12'}
-                  style={{ width: '100%', boxSizing: 'border-box' }}
-                />
-              </div>
-
-              <div className="set-field" style={{ maxWidth: '100%' }}>
-                <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                  Customer group
-                </label>
-                <select
-                  className="set-select"
-                  value={editGroup}
-                  onChange={(e) => setEditGroup(e.target.value)}
-                  style={{ width: '100%', boxSizing: 'border-box', height: '40px' }}
-                >
-                  {!groups.includes(editGroup) && editGroup && <option value={editGroup}>{editGroup}</option>}
-                  {groups.map((g) => (
-                    <option key={g} value={g}>{g}</option>
+              )}
+              {modalTab === 'Addresses' && (
+                <>
+                  <div className="cm-sub">PHYSICAL ADDRESS</div>
+                    <div className="cm-grid">
+                      <label className="cm-field"><span>Street</span><input className="set-input" value={editDetails.physical.street1} onChange={(e) => setAddr('physical', { street1: e.target.value })} /></label>
+                      <label className="cm-field"><span>Street 2</span><input className="set-input" value={editDetails.physical.street2} onChange={(e) => setAddr('physical', { street2: e.target.value })} /></label>
+                      <label className="cm-field"><span>Suburb</span><input className="set-input" value={editDetails.physical.suburb} onChange={(e) => setAddr('physical', { suburb: e.target.value })} /></label>
+                      <label className="cm-field"><span>City</span><input className="set-input" value={editDetails.physical.city} onChange={(e) => setAddr('physical', { city: e.target.value })} /></label>
+                      <label className="cm-field"><span>State</span><input className="set-input" value={editDetails.physical.state} onChange={(e) => setAddr('physical', { state: e.target.value })} /></label>
+                      <label className="cm-field"><span>ZIP code</span><input className="set-input" value={editDetails.physical.zip} onChange={(e) => setAddr('physical', { zip: e.target.value })} /></label>
+                      <label className="cm-field"><span>Country</span><input className="set-input" value={editDetails.physical.country} onChange={(e) => setAddr('physical', { country: e.target.value })} placeholder="United States" /></label>
+                    </div>
+                  <label className="cm-field cm-check">
+                    <input type="checkbox" checked={editDetails.postalSameAsPhysical} onChange={(e) => setEditDetails({ ...editDetails, postalSameAsPhysical: e.target.checked })} />
+                    <span>Postal address is the same as the physical address</span>
+                  </label>
+                  {!editDetails.postalSameAsPhysical && (
+                    <>
+                      <div className="cm-sub">POSTAL ADDRESS</div>
+                    <div className="cm-grid">
+                      <label className="cm-field"><span>Street</span><input className="set-input" value={editDetails.postal.street1} onChange={(e) => setAddr('postal', { street1: e.target.value })} /></label>
+                      <label className="cm-field"><span>Street 2</span><input className="set-input" value={editDetails.postal.street2} onChange={(e) => setAddr('postal', { street2: e.target.value })} /></label>
+                      <label className="cm-field"><span>Suburb</span><input className="set-input" value={editDetails.postal.suburb} onChange={(e) => setAddr('postal', { suburb: e.target.value })} /></label>
+                      <label className="cm-field"><span>City</span><input className="set-input" value={editDetails.postal.city} onChange={(e) => setAddr('postal', { city: e.target.value })} /></label>
+                      <label className="cm-field"><span>State</span><input className="set-input" value={editDetails.postal.state} onChange={(e) => setAddr('postal', { state: e.target.value })} /></label>
+                      <label className="cm-field"><span>ZIP code</span><input className="set-input" value={editDetails.postal.zip} onChange={(e) => setAddr('postal', { zip: e.target.value })} /></label>
+                      <label className="cm-field"><span>Country</span><input className="set-input" value={editDetails.postal.country} onChange={(e) => setAddr('postal', { country: e.target.value })} placeholder="United States" /></label>
+                    </div>
+                    </>
+                  )}
+                </>
+              )}
+              {modalTab === 'Additional information' && (
+                <div className="cm-grid">
+                  <label className="cm-field"><span>Date of birth</span><input className="set-input" type="date" value={editDetails.dateOfBirth} onChange={(e) => setEditDetails({ ...editDetails, dateOfBirth: e.target.value })} /></label>
+                  <label className="cm-field">
+                    <span>Gender</span>
+                    <select className="set-select" value={editDetails.gender} onChange={(e) => setEditDetails({ ...editDetails, gender: e.target.value })}>
+                      <option value="">Not specified</option><option>Female</option><option>Male</option><option>Non-binary</option><option>Prefer not to say</option>
+                    </select>
+                  </label>
+                  <label className="cm-field"><span>Website</span><input className="set-input" value={editDetails.website} onChange={(e) => setEditDetails({ ...editDetails, website: e.target.value })} placeholder="https://" /></label>
+                  <label className="cm-field"><span>Twitter</span><input className="set-input" value={editDetails.twitter} onChange={(e) => setEditDetails({ ...editDetails, twitter: e.target.value })} placeholder="@handle" /></label>
+                  {customFields.map((f) => (
+                    <label key={f.id} className="cm-field">
+                      <span>{f.name}</span>
+                      {f.type === 'Checkbox' ? (
+                        <input type="checkbox" checked={editDetails.customFields[f.id] === 'yes'} onChange={(e) => setEditDetails({ ...editDetails, customFields: { ...editDetails.customFields, [f.id]: e.target.checked ? 'yes' : '' } })} />
+                      ) : f.type === 'Dropdown' ? (
+                        <select className="set-select" value={editDetails.customFields[f.id] ?? ''} onChange={(e) => setEditDetails({ ...editDetails, customFields: { ...editDetails.customFields, [f.id]: e.target.value } })}>
+                          <option value="">—</option>
+                          {f.options.map((o) => <option key={o}>{o}</option>)}
+                        </select>
+                      ) : (
+                        <input className="set-input" type={f.type === 'Date' ? 'date' : f.type === 'Number' ? 'number' : 'text'} value={editDetails.customFields[f.id] ?? ''} onChange={(e) => setEditDetails({ ...editDetails, customFields: { ...editDetails.customFields, [f.id]: e.target.value } })} />
+                      )}
+                    </label>
                   ))}
-                </select>
-              </div>
-
-              <div className="set-field" style={{ maxWidth: '100%' }}>
-                <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                  Email address
-                </label>
-                <input
-                  className="set-input"
-                  value={editEmail}
-                  onChange={(e) => setEditEmail(e.target.value)}
-                  placeholder="e.g. customer@example.com"
-                  style={{ width: '100%', boxSizing: 'border-box' }}
-                />
-              </div>
-
-              <div className="set-field" style={{ maxWidth: '100%' }}>
-                <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px', display: 'block' }}>
-                  Phone number
-                </label>
-                <input
-                  className="set-input"
-                  value={editPhone}
-                  onChange={(e) => setEditPhone(e.target.value)}
-                  placeholder="e.g. +1 555 0100"
-                  style={{ width: '100%', boxSizing: 'border-box' }}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '12px' }}>
+                  <label className="cm-field cm-wide"><span>Notes</span><textarea className="set-input cm-notes" value={editDetails.notes} onChange={(e) => setEditDetails({ ...editDetails, notes: e.target.value })} placeholder="Notes about this customer (not shown to them)" /></label>
+                </div>
+              )}
+              {modalTab === 'Customer settings' && (
+                <div className="cm-grid">
+                  <label className="cm-field cm-check cm-wide">
+                    <input type="checkbox" checked={editLoyalty} onChange={(e) => setEditLoyalty(e.target.checked)} />
+                    <span>Customer earns Loyalty on purchases</span>
+                  </label>
+                  <label className="cm-field cm-check cm-wide">
+                    <input type="checkbox" checked={editDetails.taxExempt} onChange={(e) => setEditDetails({ ...editDetails, taxExempt: e.target.checked })} />
+                    <span>Tax exempt — sales to this customer don’t charge sales tax</span>
+                  </label>
+                  <label className="cm-field">
+                    <span>On-account limit{onAccountEnabled ? '' : ' (on-account sales are turned off in Setup)'}</span>
+                    <span className="cm-money"><span>$</span><MoneyInput className="set-input" minor={editLimit ?? 0} onChange={(v) => setEditLimit(v > 0 ? v : null)} placeholder="Store default" /></span>
+                    <span className="cm-hint">Leave at 0 to use the store’s default limit.</span>
+                  </label>
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', margin: '18px 0 12px' }}>
                 <button className="btn-s" onClick={() => setEditingCustId(null)} type="button">
                   Cancel
                 </button>

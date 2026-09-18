@@ -251,3 +251,5 @@
 .pe-preview-card { margin-top: 14px; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: var(--panel-2); display: flex; flex-direction: column; gap: 4px; max-width: 420px; }
 .pe-preview-card b { font-size: 16px; color: var(--text); }
 .pe-preview-card span { font-size: 13px; color: var(--muted); }
+.ue-av { width: 44px; height: 44px; font-size: 15px; overflow: hidden; }
+.ue-av-img { width: 100%; height: 100%; object-fit: cover; }

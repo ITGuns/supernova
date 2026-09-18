@@ -9,6 +9,19 @@ import { hashPassword, isHashed, verifyPassword } from '../lib/password';
 // ── Protected accounts ───────────────────────────────────────────────────────
 // These IDs can NEVER be deleted or disabled — they are seeded admin accounts.
 const PROTECTED_USER_IDS = new Set(['u-owner', 'u-jade']);
+/** Profile fields from the Add user page (migration 0010 stores them in users.details). */
+export interface UserDetails {
+  username: string;
+  /** Outlet names the user can work at; [] = all outlets. */
+  outlets: string[];
+  /** Fast switching: a 4-digit PIN and/or a barcode on their ID card. */
+  pin: string;
+  barcode: string;
+  picture: string;
+}
+
+export const EMPTY_USER_DETAILS: UserDetails = { username: '', outlets: [], pin: '', barcode: '', picture: '' };
+
 export interface AppUser {
   id: string;
   name: string;
@@ -23,7 +36,11 @@ export interface AppUser {
   targetDailyMinor?: number;
   targetWeeklyMinor?: number;
   targetMonthlyMinor?: number;
+  details?: UserDetails;
 }
+
+// Whether the cloud users table has the details column (migration 0010).
+let hasUserDetails = true;
 
 export const initials = (n: string) =>
   n
@@ -47,6 +64,7 @@ const toRow = (u: AppUser): Record<string, unknown> => ({
   target_daily_minor: u.targetDailyMinor ?? null,
   target_weekly_minor: u.targetWeeklyMinor ?? null,
   target_monthly_minor: u.targetMonthlyMinor ?? null,
+  ...(hasUserDetails ? { details: u.details ?? {} } : {}),
 });
 
 const fromRow = (r: Record<string, unknown>): AppUser => ({
@@ -62,6 +80,7 @@ const fromRow = (r: Record<string, unknown>): AppUser => ({
   targetDailyMinor: (r.target_daily_minor as number | null) ?? undefined,
   targetWeeklyMinor: (r.target_weekly_minor as number | null) ?? undefined,
   targetMonthlyMinor: (r.target_monthly_minor as number | null) ?? undefined,
+  details: { ...EMPTY_USER_DETAILS, ...((r.details as Partial<UserDetails> | null) ?? {}) },
 });
 
 const INIT: AppUser[] = [
@@ -99,7 +118,8 @@ export const useUsers = create<UserState>()(
       clockedInAt: null,
 
       syncFromDb: async () => {
-        const rows = await dbUsers.list();
+        const [rows, probe] = await Promise.all([dbUsers.list(), dbUsers.hasDetails()]);
+        if (probe !== null) hasUserDetails = probe;
         // null = request failed; [] = no accounts in the cloud. Either way keep
         // the seeded admins so the store can always be logged into.
         if (!rows || !rows.length) return;

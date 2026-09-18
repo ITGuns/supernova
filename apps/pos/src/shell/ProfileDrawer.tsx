@@ -5,6 +5,7 @@ import { verifyPassword } from '../lib/password';
 import { useCart } from '../store/cartStore';
 import { useSecurity } from '../store/securityStore';
 import { useUsers } from '../store/userStore';
+import { useTimeEntries } from '../store/timeEntryStore';
 
 const startOfDay = (t: number): number => {
   const d = new Date(t);
@@ -102,7 +103,18 @@ export function ProfileDrawer({ onClose }: { onClose: () => void }) {
         <div className="pd-clock">
           <div className={`pd-clock-status ${clockedIn ? 'in' : ''}`}>You are clocked {clockedIn ? 'in' : 'out'}</div>
           <div className="pd-clock-time">{elapsed()}</div>
-          <button className="btn-s pd-clockbtn" onClick={() => (clockedIn ? clockOut() : clockIn())}>
+          <button
+            className="btn-s pd-clockbtn"
+            onClick={() => {
+              if (clockedIn) {
+                clockOut();
+                useTimeEntries.getState().clockOut(user.name);
+              } else {
+                clockIn();
+                useTimeEntries.getState().clockIn(user.name);
+              }
+            }}
+          >
             {clockedIn ? 'Clock out' : 'Clock in'}
           </button>
         </div>
