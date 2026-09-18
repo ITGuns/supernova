@@ -10,6 +10,8 @@ import { useCustomers } from '../store/customerStore';
 import { useSerialNumbers } from '../store/serialNumberStore';
 import { useSettings } from '../store/settingsStore';
 import { useUsers } from '../store/userStore';
+import { useSetup } from '../store/setupStore';
+import { isCash, tenderLabel } from '../lib/tenders';
 import '../styles/sell.css';
 
 // The sale panel on the Sell screen: customer, lines (click a line to edit
@@ -40,6 +42,11 @@ export function RegisterCart({ onPay }: { onPay: () => void }) {
   const customFields = useCart((s) => s.customFields);
   const setCustomFields = useCart((s) => s.setCustomFields);
   const pendingSerial = useCart((s) => s.pendingSerial);
+  const paying = useCart((s) => s.paying);
+  const pendingTenders = useCart((s) => s.pendingTenders);
+  const removePendingTender = useCart((s) => s.removePendingTender);
+  const paymentTypes = useSetup((s) => s.paymentTypes);
+  const pendingPaid = pendingTenders.reduce((a, t) => a + t.amountMinor, 0);
   const setLineSerial = useCart((s) => s.setLineSerial);
   const serials = useSerialNumbers((s) => s.serials);
   const saleFields = useCustomFields((s) => s.fields).filter((f) => f.application === 'Sales');
@@ -82,7 +89,7 @@ export function RegisterCart({ onPay }: { onPay: () => void }) {
   };
 
   return (
-    <section className="dcart">
+    <section className={`dcart ${paying ? 'dcart-paying' : ''}`}>
       <div className="dcart-customer">
         <span className="dcart-cust-icon">☺</span>
         {attached ? (
@@ -249,6 +256,21 @@ export function RegisterCart({ onPay }: { onPay: () => void }) {
               </div>
             </>
           )}
+          {(paying || pendingTenders.length > 0) && (
+            <>
+              <div className="dtrow pm-total"><span>Total to pay</span><span>{fmt(toPay)}</span></div>
+              {pendingTenders.map((t) => (
+                <div key={t.id} className="dtrow dcart-payment">
+                  <span>
+                    {isCash(t.method) ? '💵 ' : ''}{tenderLabel(t.method, paymentTypes)}{t.reference ? ` · ${t.reference}` : ''}
+                    <button className="dtrow-x" onClick={() => removePendingTender(t.id)} aria-label="Remove payment">🗑</button>
+                  </span>
+                  <span>−{fmt(t.amountMinor)}</span>
+                </div>
+              ))}
+              <div className="dtrow pm-total dcart-balance"><span>Balance</span><span>{fmt(Math.max(0, toPay - pendingPaid))}</span></div>
+            </>
+          )}
         </div>
       )}
 
@@ -296,15 +318,22 @@ export function RegisterCart({ onPay }: { onPay: () => void }) {
         </div>
       )}
 
+      {paying ? (
+        <div className="dpay dpay-paying">
+          <span className="dpay-l">Balance</span>
+          <span className="dpay-amt">{fmt(Math.max(0, toPay - pendingPaid))}</span>
+        </div>
+      ) : (
       <button className={`dpay ${empty ? 'dpay-empty' : ''}`} disabled={empty} onClick={onPay}>
         <span className="dpay-l">
-          Pay{' '}
+          {pendingTenders.length ? 'Pay balance' : 'Pay'}{' '}
           <span className="dpay-items">
             {totals.itemCount} item{totals.itemCount === 1 ? '' : 's'}
           </span>
         </span>
-        <span className="dpay-amt">{fmt(toPay)}</span>
+        <span className="dpay-amt">{fmt(Math.max(0, toPay - pendingPaid))}</span>
       </button>
+      )}
 
       {serialLine && (
         <div className="pm-overlay" onClick={() => setLineSerial(serialLine.lineId, '')}>

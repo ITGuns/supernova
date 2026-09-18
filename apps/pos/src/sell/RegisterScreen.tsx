@@ -14,14 +14,16 @@ import { useWorkflows } from '../store/workflowStore';
 import { newGiftCardNumber, useGiftCards } from '../store/giftCardStore';
 import { runRules } from '../lib/rules';
 import { ParkedTray } from './ParkedTray';
-import { PayModal } from './PayModal';
+import { PayScreen } from './PayScreen';
 import { QuickKeys } from './QuickKeys';
 import { Receipt } from './Receipt';
 import { RegisterCart } from './RegisterCart';
 
 export function RegisterScreen() {
   const [query, setQuery] = useState('');
-  const [payOpen, setPayOpen] = useState(false);
+  const payOpen = useCart((s) => s.paying);
+  const setPaying = useCart((s) => s.setPaying);
+  const setPayOpen = (open: boolean) => setPaying(open);
   const [parkedOpen, setParkedOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
 
@@ -76,6 +78,12 @@ export function RegisterScreen() {
       )}
       <div className="reg-cols">
       <div className="reg-col reg-qk">
+        {lastSale ? (
+          <Receipt />
+        ) : payOpen ? (
+          <PayScreen onBack={() => setPayOpen(false)} />
+        ) : (
+        <>
         <div className="reg-label">Search for products</div>
         <div className="reg-search">
           <span className="reg-search-icon">⌕</span>
@@ -100,6 +108,8 @@ export function RegisterScreen() {
               quick keys in Settings.
             </div>
           </div>
+        )}
+        </>
         )}
       </div>
 
@@ -188,9 +198,7 @@ export function RegisterScreen() {
         />
       )}
       {registerStatus === 'closed' && <OpenRegisterPrompt />}
-      {payOpen && <PayModal onClose={() => setPayOpen(false)} />}
       {parkedOpen && <ParkedTray onClose={() => setParkedOpen(false)} />}
-      {lastSale && <Receipt />}
     </main>
   );
 }

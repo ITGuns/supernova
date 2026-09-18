@@ -257,6 +257,10 @@ interface CartState {
   pendingSerial: string | null;
   /** Messages business rules asked the cashier to see after the last sale. */
   lastSaleNotices: string[];
+  /** Payments taken so far on the Pay screen (before the sale completes). */
+  pendingTenders: Tender[];
+  /** Whether the Pay screen is open (the sale panel shows payments and balance). */
+  paying: boolean;
   lastSale: CompletedSale | null;
   sales: CompletedSale[];
 
@@ -284,6 +288,10 @@ interface CartState {
   setCustomer: (name: string) => void;
   setOrderNote: (note: string) => void;
   setFulfillment: (f: { kind: FulfillmentKind; note: string } | null) => void;
+  setPaying: (paying: boolean) => void;
+  addPendingTender: (t: Tender) => void;
+  removePendingTender: (id: string) => void;
+  clearPendingTenders: () => void;
   setCustomFields: (cf: Record<string, string>) => void;
   /** Record the serial being sold on a line ('' = none) and close the prompt. */
   setLineSerial: (lineId: string, serial: string) => void;
@@ -419,6 +427,8 @@ export const useCart = create<CartState>()(
   customFields: {},
   pendingSerial: null,
   lastSaleNotices: [],
+  pendingTenders: [],
+  paying: false,
   lastSale: null,
   sales: [],
 
@@ -495,6 +505,11 @@ export const useCart = create<CartState>()(
     })),
 
   setFulfillment: (fulfillment) => set({ fulfillment }),
+  // Going back to the sale keeps any payments already taken; discarding the sale clears them.
+  setPaying: (paying) => set({ paying }),
+  addPendingTender: (t) => set((state) => ({ pendingTenders: [...state.pendingTenders, t] })),
+  removePendingTender: (id) => set((state) => ({ pendingTenders: state.pendingTenders.filter((t) => t.id !== id) })),
+  clearPendingTenders: () => set({ pendingTenders: [] }),
   setCustomFields: (customFields) => set({ customFields }),
 
   addCustomLine: ({ name, priceMinor }) =>
@@ -528,7 +543,7 @@ export const useCart = create<CartState>()(
   removeLine: (lineId) =>
     set((state) => ({ lines: state.lines.filter((l) => l.lineId !== lineId) })),
 
-  clear: () => set({ lines: [], orderDiscountBps: 0, orderDiscountMinor: 0, taxRemoved: false, promoCode: '', openSaleNumber: null, customerName: '', orderNote: '', fulfillment: null, customFields: {}, pendingSerial: null }),
+  clear: () => set({ lines: [], orderDiscountBps: 0, orderDiscountMinor: 0, taxRemoved: false, promoCode: '', openSaleNumber: null, customerName: '', orderNote: '', fulfillment: null, customFields: {}, pendingSerial: null, pendingTenders: [], paying: false }),
 
   toggleDiscount: () => set((state) => ({ orderDiscountBps: state.orderDiscountBps > 0 ? 0 : 1000, orderDiscountMinor: 0 })),
 
@@ -693,6 +708,8 @@ export const useCart = create<CartState>()(
       fulfillment: null,
       customFields: {},
       pendingSerial: null,
+      pendingTenders: [],
+      paying: false,
       orderSeq: state.orderSeq + 1,
       lastSale: completed,
       sales: [completed, ...state.sales],
@@ -844,6 +861,8 @@ export const useCart = create<CartState>()(
       fulfillment: null,
       customFields: {},
       pendingSerial: null,
+      pendingTenders: [],
+      paying: false,
       lastSale: updated,
       sales: state.sales.map((s) => (s.orderNumber === orderNo ? updated : s)),
     });

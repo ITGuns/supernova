@@ -41,10 +41,10 @@ export function Receipt() {
   const adjustment = sale.totalMinor - subtotal;
 
   return (
-    <div className="pm-overlay">
+    <div className="rcpt-wrap">
       <div className="rcpt">
         <div className="rcpt-check">✓</div>
-        <h2>{sale.status === 'Layaway' || sale.status === 'On account' ? `Sale saved ${sale.status === 'Layaway' ? 'as layaway' : 'on account'}` : 'Payment received'}</h2>
+        <h2>{sale.status === 'Layaway' || sale.status === 'On account' ? `Sale saved ${sale.status === 'Layaway' ? 'as layaway' : 'on account'}` : 'Sale complete'}</h2>
         <div className="rcpt-order">
           Sale {sale.orderNumber} · {fmt(sale.paidMinor !== undefined ? sale.paidMinor : sale.totalMinor)} paid
           {sale.paidMinor !== undefined && ` · ${fmt(sale.totalMinor - sale.paidMinor)} to pay`}
@@ -74,8 +74,8 @@ export function Receipt() {
             </div>
           ))}
           {sale.changeMinor > 0 && (
-            <div className="dtrow disc">
-              <span>Change given</span>
+            <div className="dtrow pm-total rcpt-change">
+              <span>Change</span>
               <span>{fmt(sale.changeMinor)}</span>
             </div>
           )}
