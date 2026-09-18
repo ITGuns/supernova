@@ -8,6 +8,14 @@ import {
 } from '@nova/domain';
 import { TAX_RATES, type TaxGroupId } from '../data/catalog';
 import type { CartLine } from '../store/cartStore';
+import type { ResolvedRate } from './taxes';
+
+export interface TaxRow {
+  id: string;
+  name: string;
+  rateBps: number;
+  amountMinor: number;
+}
 
 export interface CartTotals {
   subtotalMinor: number;
@@ -16,12 +24,26 @@ export interface CartTotals {
   totalMinor: number;
   itemCount: number;
   pricedLines: readonly PricedLine[];
+  /** Tax charged, one row per rate. */
+  taxRows: TaxRow[];
+  /** Whether tax was carved out of the prices (tax-inclusive store) rather than added on. */
+  taxInclusive: boolean;
 }
 
 /** A whole-sale discount: a percentage (basis points) or a fixed amount. */
 export interface OrderDiscount {
   bps?: number;
   amountMinor?: number;
+  /** Automatic (advanced promotion) discounts, applied after the manual one. */
+  promotions?: { name: string; amountMinor: number }[];
+}
+
+export interface TotalsOptions {
+  removeTax?: boolean;
+  /** Resolve the tax rate for a line (Setup → Sales taxes). Wins over the legacy override. */
+  rateFor?: (line: CartLine) => ResolvedRate | null;
+  /** Prices already include tax (tax-exclusive display prices turned off). */
+  inclusive?: boolean;
 }
 
 export function computeTotals(
@@ -29,10 +51,9 @@ export function computeTotals(
   // A plain number is a percentage in basis points (legacy callers).
   discount: number | OrderDiscount = 0,
   currency = 'USD',
-  // Store-wide default sales tax rate (basis points). When provided it overrides
-  // each product's tax group — this is what the "Default sales tax" setting drives.
+  // Store-wide default sales tax rate (basis points), used when no resolver is given.
   taxRateBpsOverride?: number,
-  opts: { removeTax?: boolean } = {},
+  opts: TotalsOptions = {},
 ): CartTotals {
   const order: OrderDiscount = typeof discount === 'number' ? { bps: discount } : discount;
   const discounts: AppliedDiscountInput[] = [];
@@ -54,6 +75,9 @@ export function computeTotals(
   } else if ((order.amountMinor ?? 0) > 0) {
     discounts.push({ id: 'order-disc', name: 'Discount', scope: 'ORDER', method: 'FIXED_AMOUNT', value: order.amountMinor ?? 0 });
   }
+  (order.promotions ?? []).forEach((p, i) => {
+    if (p.amountMinor > 0) discounts.push({ id: `promo-${i}`, name: p.name, scope: 'ORDER', method: 'FIXED_AMOUNT', value: p.amountMinor });
+  });
 
   const priced = priceCart({
     channel: 'RETAIL',
@@ -68,43 +92,41 @@ export function computeTotals(
     discounts,
   });
 
+  const byLine = new Map(lines.map((l) => [l.lineId, l]));
+  const inclusive = !!opts.inclusive;
   const tax = computeTax(priced.lines, (line): ResolvedTaxRate[] => {
     if (opts.removeTax) return [];
-    // Store-wide default tax setting wins when provided; otherwise fall back to
-    // the product's own tax group.
-    let rateBasisPoints: number;
-    let name: string;
-    let rateId: string;
-    if (taxRateBpsOverride !== undefined) {
-      rateBasisPoints = taxRateBpsOverride;
-      name = 'Sales Tax';
-      rateId = 'store-default';
+    let resolved: ResolvedRate | null;
+    if (opts.rateFor) {
+      const cartLine = byLine.get(line.lineId);
+      resolved = cartLine ? opts.rateFor(cartLine) : null;
+    } else if (taxRateBpsOverride !== undefined) {
+      // Store-wide default tax setting (legacy callers without a resolver).
+      resolved = { id: 'store-default', name: 'Sales Tax', rateBps: taxRateBpsOverride };
     } else {
       const groupId = line.taxGroupId as TaxGroupId | null | undefined;
       const cfg = groupId ? TAX_RATES[groupId] : undefined;
-      if (!cfg) return [];
-      rateBasisPoints = cfg.rateBasisPoints;
-      name = cfg.name;
-      rateId = groupId as string;
+      resolved = cfg ? { id: groupId as string, name: cfg.name, rateBps: cfg.rateBasisPoints } : null;
     }
-    if (rateBasisPoints === 0) return [];
-    return [
-      {
-        taxRateId: rateId,
-        name,
-        rateBasisPoints,
-        inclusive: false,
-        compound: false,
-        priority: 0,
-      },
-    ];
+    if (!resolved || resolved.rateBps === 0) return [];
+    return [{ taxRateId: resolved.id, name: resolved.name, rateBasisPoints: resolved.rateBps, inclusive, compound: false, priority: 0 }];
   });
+
+  const rows = new Map<string, TaxRow>();
+  for (const lt of tax.lines)
+    for (const snap of lt.snapshots) {
+      const row = rows.get(snap.taxRateId) ?? { id: snap.taxRateId, name: snap.taxName, rateBps: snap.rateBasisPoints, amountMinor: 0 };
+      row.amountMinor += snap.taxAmountMinor;
+      rows.set(snap.taxRateId, row);
+    }
+  const taxRows = [...rows.values()];
 
   const subtotalMinor = priced.subtotalMinor;
   const discountMinor = priced.discountTotalMinor;
-  const taxMinor = tax.taxTotalMinor;
-  const totalMinor = subtotalMinor - discountMinor + taxMinor;
+  // Inclusive tax lives inside the prices, so it never adds to what the customer pays.
+  const taxMinor = inclusive ? taxRows.reduce((a, r) => a + r.amountMinor, 0) : tax.taxTotalMinor;
+  const totalMinor = subtotalMinor - discountMinor + (inclusive ? 0 : taxMinor);
   const itemCount = lines.reduce((s, l) => s + l.quantity, 0);
 
-  return { subtotalMinor, discountMinor, taxMinor, totalMinor, itemCount, pricedLines: priced.lines };
+  return { subtotalMinor, discountMinor, taxMinor, totalMinor, itemCount, pricedLines: priced.lines, taxRows, taxInclusive: inclusive };
 }

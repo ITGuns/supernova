@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { fmt } from '../lib/format';
 import { isCash, methodOf } from '../lib/tenders';
 import { useCart } from '../store/cartStore';
+import { runRules } from '../lib/rules';
 import { useRegisterSession } from '../store/registerSessionStore';
 import { useSetup } from '../store/setupStore';
 import { useUsers } from '../store/userStore';
@@ -96,6 +97,7 @@ export function CloseRegister() {
       note: closeNote,
       by: userName,
     });
+    runRules('Register closed', { user: userName });
     // Start the next closure with an empty count sheet.
     setQty({});
     setCustom('');

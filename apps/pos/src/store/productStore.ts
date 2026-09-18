@@ -53,6 +53,8 @@ export interface Product extends CatalogItem {
   breaksInto?: ProductRef[];
   images?: string[];
   shipping?: ProductShipping;
+  /** Values of the product custom fields (Setup → Workflows). */
+  customFields?: Record<string, string>;
 }
 
 export const EMPTY_SHIPPING: ProductShipping = { weightG: 0, lengthCm: 0, widthCm: 0, heightCm: 0, notes: '' };
@@ -81,6 +83,8 @@ export const stockLinesFor = (p: Product, qty: number): { id: string; delta: num
 // 0005. Detected from the first synced row so a write never sends columns an
 // older schema would reject.
 let hasDetailColumns = true;
+// Whether it has custom_fields (migration 0011).
+let hasCustomFields = true;
 
 const toRow = (p: Product): Record<string, unknown> => ({
   id: p.id,
@@ -97,6 +101,7 @@ const toRow = (p: Product): Record<string, unknown> => ({
   brand: p.brand,
   supplier: p.supplier,
   image: p.image ?? null,
+  ...(hasCustomFields ? { custom_fields: p.customFields ?? {} } : {}),
   ...(hasDetailColumns
     ? {
         description: p.description ?? '',
@@ -161,6 +166,7 @@ const fromRow = (r: Record<string, unknown>): Product => ({
   breaksInto: (r.breaks_into as ProductRef[] | null) ?? [],
   images: (r.images as string[] | null) ?? [],
   shipping: { ...EMPTY_SHIPPING, ...((r.shipping as Partial<ProductShipping> | null) ?? {}) },
+  customFields: (r.custom_fields as Record<string, string> | null) ?? {},
 });
 
 interface ProductState {
@@ -183,8 +189,9 @@ export const useProducts = create<ProductState>()(
       syncFromDb: async () => {
         const rows = await dbProducts.list();
         if (!rows) return; // request failed — keep the cached catalog
-        const probe = await dbProducts.hasDetailColumns();
+        const [probe, cfProbe] = await Promise.all([dbProducts.hasDetailColumns(), dbProducts.hasCustomFields()]);
         if (probe !== null) hasDetailColumns = probe;
+        if (cfProbe !== null) hasCustomFields = cfProbe;
         set({ products: rows.map(fromRow) }); // [] is a real answer: no products
       },
 

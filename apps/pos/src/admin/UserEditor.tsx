@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { hashPassword } from '../lib/password';
 import { useSetup } from '../store/setupStore';
 import { EMPTY_USER_DETAILS, initials, useUsers, type AppUser, type UserDetails } from '../store/userStore';
+import { useCustomFields } from '../store/customFieldStore';
 import { Field, Section } from './FormLayout';
 import '../styles/product-editor.css';
 
@@ -24,6 +25,7 @@ export function UserEditor() {
   const updateUser = useUsers((s) => s.updateUser);
   const deleteUser = useUsers((s) => s.deleteUser);
   const outlets = useSetup((s) => s.outlets);
+  const userFields = useCustomFields((s) => s.fields).filter((f) => f.application === 'Users');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const existing = id ? users.find((u) => u.id === id) : undefined;
@@ -178,6 +180,27 @@ export function UserEditor() {
             </Field>
           </div>
         </Section>
+
+        {userFields.length > 0 && (
+          <Section title="Custom fields" hint="Extra details your store keeps on users (Setup → Workflows → Custom fields).">
+            <div className="pe-grid2">
+              {userFields.map((f) => (
+                <Field key={f.id} label={f.name}>
+                  {f.type === 'Checkbox' ? (
+                    <label className="pe-check"><input type="checkbox" checked={details.customFields[f.id] === 'yes'} onChange={(e) => setD({ customFields: { ...details.customFields, [f.id]: e.target.checked ? 'yes' : '' } })} /><span>Yes</span></label>
+                  ) : f.type === 'Dropdown' ? (
+                    <select className="pe-input" value={details.customFields[f.id] ?? ''} onChange={(e) => setD({ customFields: { ...details.customFields, [f.id]: e.target.value } })}>
+                      <option value="">—</option>
+                      {f.options.map((o) => <option key={o}>{o}</option>)}
+                    </select>
+                  ) : (
+                    <input className="pe-input" type={f.type === 'Date' ? 'date' : f.type === 'Number' ? 'number' : 'text'} value={details.customFields[f.id] ?? ''} onChange={(e) => setD({ customFields: { ...details.customFields, [f.id]: e.target.value } })} />
+                  )}
+                </Field>
+              ))}
+            </div>
+          </Section>
+        )}
 
         <Section title="Switch users faster" hint="A PIN or a barcode on the user’s ID card lets them switch to their account at the register without typing a password (see Setup → Security).">
           <div className="pe-grid2">

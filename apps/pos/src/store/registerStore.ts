@@ -38,6 +38,10 @@ export const QK_SLOTS = 40;
 export const QK_COLORS = ['#e13ec9', '#ef6f3c', '#f0c53c', '#c25fd0', '#7b8cf0', '#8c4ae2', ''];
 
 interface RegisterState {
+  /** Which outlet / register this device is (Sell → Status). null = the first outlet. */
+  outletId: string | null;
+  registerName: string | null;
+  setDevice: (outletId: string | null, registerName: string | null) => void;
   trainingMode: boolean;
   quickKeysEnabled: boolean;
   layouts: QuickKeyLayout[];
@@ -77,6 +81,9 @@ let hydrating = false;
 export const useRegister = create<RegisterState>()(
   persist(
     (set, get) => ({
+      outletId: null,
+      registerName: null,
+      setDevice: (outletId, registerName) => set({ outletId, registerName }),
       trainingMode: false,
       quickKeysEnabled: true,
       layouts: DEFAULT_LAYOUTS,
@@ -223,6 +230,8 @@ export const useRegister = create<RegisterState>()(
       name: 'nova-register-v1',
       version: 2,
       partialize: (s) => ({
+        outletId: s.outletId,
+        registerName: s.registerName,
         trainingMode: s.trainingMode,
         quickKeysEnabled: s.quickKeysEnabled,
         layouts: s.layouts,

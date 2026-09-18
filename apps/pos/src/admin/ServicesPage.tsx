@@ -15,6 +15,12 @@ export function ServicesPage() {
   const services = useServices((s) => s.services);
   const statuses = useServices((s) => s.statuses);
   const setStatus = useServices((s) => s.setStatus);
+  const addStatus = useServices((s) => s.addStatus);
+  const renameStatus = useServices((s) => s.renameStatus);
+  const deleteStatus = useServices((s) => s.deleteStatus);
+  const [manage, setManage] = useState(false);
+  const [newStatus, setNewStatus] = useState('');
+  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const users = useUsers((s) => s.users);
   const [tab, setTab] = useState<'current' | 'all'>('current');
   const [status, setStatusFilter] = useState('All current services');
@@ -57,8 +63,35 @@ export function ServicesPage() {
           <span>
             View, change statuses and add notes to your services. <span className="rlink">Need help?</span>
           </span>
-          <button className="btn-p" onClick={() => navigate('/services/new')}>Create service</button>
+          <span className="pe-inline">
+            <span className="rlink" onClick={() => setManage((m) => !m)}>{manage ? 'Done' : 'Manage statuses'}</span>
+            <button className="btn-p" onClick={() => navigate('/services/new')}>Create service</button>
+          </span>
         </div>
+        {manage && (
+          <div className="svc-manage">
+            <div className="pe-caps">Service statuses</div>
+            {statuses.map((st) => (
+              <div key={st.id} className="svc-status-row">
+                {renaming?.id === st.id ? (
+                  <input className="set-input" value={renaming.name} autoFocus onChange={(e) => setRenaming({ id: st.id, name: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter' && renaming.name.trim()) { renameStatus(st.id, renaming.name.trim()); setRenaming(null); } if (e.key === 'Escape') setRenaming(null); }} onBlur={() => { if (renaming.name.trim()) renameStatus(st.id, renaming.name.trim()); setRenaming(null); }} />
+                ) : (
+                  <span>{st.name}{st.system && <span className="ct-muted"> · built in</span>}</span>
+                )}
+                {!st.system && (
+                  <span className="row-actions">
+                    <span className="rlink" onClick={() => setRenaming({ id: st.id, name: st.name })}>Rename</span>
+                    <span className="rlink" onClick={() => deleteStatus(st.id)}>Delete</span>
+                  </span>
+                )}
+              </div>
+            ))}
+            <div className="add-bar">
+              <input className="set-input" value={newStatus} onChange={(e) => setNewStatus(e.target.value)} placeholder="New status name" style={{ flex: 1 }} onKeyDown={(e) => { if (e.key === 'Enter' && newStatus.trim()) { addStatus(newStatus.trim()); setNewStatus(''); } }} />
+              <button className="btn-p" disabled={!newStatus.trim()} onClick={() => { addStatus(newStatus.trim()); setNewStatus(''); }}>Add status</button>
+            </div>
+          </div>
+        )}
 
         <div className="sc-filter-card">
           <div className="sc-frow">

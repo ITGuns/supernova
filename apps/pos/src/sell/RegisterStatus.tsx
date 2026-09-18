@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useProducts } from '../store/productStore';
 import { useRegisterSession } from '../store/registerSessionStore';
+import { useRegister } from '../store/registerStore';
+import { useSetup } from '../store/setupStore';
 
 interface Row {
   label: string;
@@ -10,6 +12,10 @@ interface Row {
 }
 
 export function RegisterStatus() {
+  const outlets = useSetup((st) => st.outlets);
+  const deviceOutletId = useRegister((st) => st.outletId);
+  const deviceRegister = useRegister((st) => st.registerName);
+  const setDevice = useRegister((st) => st.setDevice);
   const regStatus = useRegisterSession((s) => s.status);
   const openedAt = useRegisterSession((s) => s.openedAt);
   const productCount = useProducts((s) => s.products.length);
@@ -84,6 +90,24 @@ export function RegisterStatus() {
         ))}
       </div>
 
+      <div className="rs-section">
+        <h2 className="rs-h">This device</h2>
+        <p className="rs-text">Sales, taxes and stock movements from this device are recorded against this outlet and register.</p>
+        <div className="reg-two">
+          <label className="reg-open-field">
+            <span>Outlet</span>
+            <select value={deviceOutletId ?? outlets[0]?.id ?? ''} onChange={(e) => setDevice(e.target.value, outlets.find((o) => o.id === e.target.value)?.registers[0] ?? null)}>
+              {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </label>
+          <label className="reg-open-field">
+            <span>Register</span>
+            <select value={deviceRegister ?? outlets.find((o) => o.id === (deviceOutletId ?? outlets[0]?.id))?.registers[0] ?? ''} onChange={(e) => setDevice(deviceOutletId ?? outlets[0]?.id ?? null, e.target.value)}>
+              {(outlets.find((o) => o.id === (deviceOutletId ?? outlets[0]?.id))?.registers ?? []).map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </label>
+        </div>
+      </div>
       <div className="rs-section st-reset">
         <div className="rs-side">
           <div className="cr-h">Reset local data</div>

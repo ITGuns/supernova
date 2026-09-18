@@ -135,6 +135,8 @@ export const dbCatalogMeta = {
 
 // ─── Products ────────────────────────────────────────────────────────────────
 export const dbProducts = {
+  /** Whether products has custom_fields (migration 0011). */
+  hasCustomFields: () => hasColumn('products', 'custom_fields'),
   async list() {
     if (!ok()) return null;
     const { data, error } = await supabase
@@ -203,6 +205,8 @@ export const dbCustomers = {
 
 // ─── Sales ───────────────────────────────────────────────────────────────────
 export const dbSales = {
+  /** Whether sales has returned_lines / custom_fields (migration 0011). */
+  hasReturnedLines: () => hasColumn('sales', 'returned_lines'),
   async list() {
     if (!ok()) return null;
     const { data, error } = await supabase
@@ -385,6 +389,13 @@ export const dbPromotions = {
   del: (id: string) => delBy('promotions', 'id', id),
   /** Whether the table has the targeting / schedule columns (migration 0009). */
   hasTargeting: () => hasColumn('promotions', 'target'),
+  /** Whether the table has the advanced-promotion column (migration 0011). */
+  hasAdvanced: () => hasColumn('promotions', 'advanced'),
+};
+export const dbGiftCards = {
+  list: () => listOrMissing('gift_cards', 'created_at'),
+  upsert: (row: Row) => upsert('gift_cards', row),
+  del: (id: string) => delBy('gift_cards', 'id', id),
 };
 export const dbPriceBooks = {
   list: () => listOrMissing('price_books', 'created_at'),
@@ -404,6 +415,7 @@ export const dbInventoryAdjustments = {
   del: (id: string) => delBy('inventory_adjustments', 'id', id),
 };
 export const dbServices = {
+  hasCustomFields: () => hasColumn('services', 'custom_fields'),
   list: () => listOrMissing('services', 'created_at'),
   upsert: (row: Row) => upsert('services', row),
   del: (id: string) => delBy('services', 'id', id),

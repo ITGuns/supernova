@@ -5,6 +5,7 @@ import { useProducts } from '../store/productStore';
 import { useTheme } from '../store/themeStore';
 import { useUsers } from '../store/userStore';
 import { NotificationsDrawer } from './NotificationsDrawer';
+import { useNotifications } from '../store/notificationStore';
 import { NovaLogo } from './NovaLogo';
 import { ProfileDrawer } from './ProfileDrawer';
 import '../styles/setup.css';
@@ -18,6 +19,7 @@ export function TopBar() {
   const effective = override ?? sectionDefault;
   const [profileOpen, setProfileOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const unread = useNotifications((st) => st.items.filter((n) => !n.read).length);
   const [helpOpen, setHelpOpen] = useState(false);
   const [query, setQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
@@ -105,6 +107,7 @@ export function TopBar() {
           {effective === 'dark' ? '☾' : '☀'}
         </button>
         <button className="topbar-bell" aria-label="Notifications" onClick={() => setNotifOpen(true)}>
+          {unread > 0 && <span className="topbar-badge">{unread}</span>}
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
             <path d="M13.7 21a2 2 0 0 1-3.4 0" />

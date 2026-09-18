@@ -1,9 +1,13 @@
 import { useState } from 'react';
 import { IntInput, MoneyInput, NumInput } from '../admin/NumInput';
+import { useCheckout } from '../lib/checkout';
 import { fmt } from '../lib/format';
-import { computeTotals } from '../lib/totals';
+import { runRules } from '../lib/rules';
+import { FULFILLMENT_LABEL } from '../store/fulfillmentStore';
 import { saleBalance, useCart } from '../store/cartStore';
+import { useCustomFields } from '../store/customFieldStore';
 import { useCustomers } from '../store/customerStore';
+import { useSerialNumbers } from '../store/serialNumberStore';
 import { useSettings } from '../store/settingsStore';
 import { useUsers } from '../store/userStore';
 import '../styles/sell.css';
@@ -31,6 +35,15 @@ export function RegisterCart({ onPay }: { onPay: () => void }) {
   const setCustomer = useCart((s) => s.setCustomer);
   const orderNote = useCart((s) => s.orderNote);
   const setOrderNote = useCart((s) => s.setOrderNote);
+  const fulfillment = useCart((s) => s.fulfillment);
+  const setFulfillment = useCart((s) => s.setFulfillment);
+  const customFields = useCart((s) => s.customFields);
+  const setCustomFields = useCart((s) => s.setCustomFields);
+  const pendingSerial = useCart((s) => s.pendingSerial);
+  const setLineSerial = useCart((s) => s.setLineSerial);
+  const serials = useSerialNumbers((s) => s.serials);
+  const saleFields = useCustomFields((s) => s.fields).filter((f) => f.application === 'Sales');
+  const [notice, setNotice] = useState('');
   const customers = useCustomers((s) => s.customers);
   const addCustomer = useCustomers((s) => s.addCustomer);
   const groups = useCustomers((s) => s.groups);
@@ -45,8 +58,11 @@ export function RegisterCart({ onPay }: { onPay: () => void }) {
   const [promoErr, setPromoErr] = useState('');
   const [newCustomer, setNewCustomer] = useState<string | null>(null);
 
-  const totals = computeTotals(lines, { bps: discountBps, amountMinor: discountMinor }, 'USD', taxBps, { removeTax: taxRemoved });
+  const totals = useCheckout();
   const empty = lines.length === 0;
+  const manualDiscount = totals.discountMinor - totals.promotions.reduce((a, p) => a + p.amountMinor, 0) - lines.reduce((a, l) => a + Math.round(l.unitPriceMinor * l.quantity * ((l.discountPct ?? 0) / 100)), 0);
+  const serialLine = pendingSerial ? lines.find((l) => l.lineId === pendingSerial) : undefined;
+  const serialChoices = serialLine ? serials.filter((sn) => sn.productId === serialLine.variantId && sn.status === 'In stock' && !lines.some((l) => l.serial === sn.serial && l.lineId !== serialLine.lineId)) : [];
   const openSale = openSaleNumber ? sales.find((s) => s.orderNumber === openSaleNumber) : undefined;
   const paidSoFar = openSale?.paidMinor ?? 0;
   const toPay = Math.max(0, totals.totalMinor - paidSoFar);
@@ -96,6 +112,17 @@ export function RegisterCart({ onPay }: { onPay: () => void }) {
         </button>
       )}
 
+      {notice && (
+        <div className="dcart-open dcart-notice">
+          {notice} <button className="dtrow-link" onClick={() => setNotice('')}>Dismiss</button>
+        </div>
+      )}
+      {fulfillment && (
+        <div className="dcart-open">
+          {FULFILLMENT_LABEL[fulfillment.kind]}{fulfillment.note ? ` · ${fulfillment.note}` : ''} — the sale goes to Inventory → Fulfillments once it’s paid.
+          <button className="dtrow-x" onClick={() => setFulfillment(null)} aria-label="Remove fulfillment">🗑</button>
+        </div>
+      )}
       {openSale && (
         <div className="dcart-open">
           Continuing {openSale.status === 'Layaway' ? 'layaway' : 'on account'} sale {openSale.orderNumber} · {fmt(paidSoFar)} paid so far. Existing items are locked.
@@ -120,6 +147,8 @@ export function RegisterCart({ onPay }: { onPay: () => void }) {
                     {fmt(l.unitPriceMinor)} ea
                     {(l.discountPct ?? 0) > 0 && <span className="dline-promo"> · {l.discountPct}% off</span>}
                     {l.priceNote && <span className="dline-promo"> · {l.priceNote}</span>}
+                    {l.serial && <span className="dline-note"> · Serial {l.serial}</span>}
+                    {l.giftCard && <span className="dline-note"> · #{l.giftCard.number}</span>}
                     {l.note && <span className="dline-note"> · {l.note}</span>}
                     {l.soldBy && <span className="dline-note"> · Sold by {l.soldBy}</span>}
                   </div>
@@ -170,26 +199,44 @@ export function RegisterCart({ onPay }: { onPay: () => void }) {
             <span>Subtotal</span>
             <span>{fmt(totals.subtotalMinor)}</span>
           </div>
-          {totals.discountMinor > 0 && (
+          {(discountBps > 0 || discountMinor > 0) && manualDiscount > 0 && (
             <div className="dtrow disc">
               <span>
                 Discount{discountBps > 0 ? ` (${discountBps / 100}%)` : ''}
-                {(discountBps > 0 || discountMinor > 0) && <button className="dtrow-x" onClick={() => setOrderDiscount({})} aria-label="Remove discount">🗑</button>}
+                <button className="dtrow-x" onClick={() => setOrderDiscount({})} aria-label="Remove discount">🗑</button>
               </span>
-              <span>−{fmt(totals.discountMinor)}</span>
+              <span>−{fmt(manualDiscount)}</span>
             </div>
           )}
-          <div className="dtrow">
-            <span>
-              Tax
-              {taxRemoved ? (
-                <button className="dtrow-link" onClick={() => setTaxRemoved(false)}>Restore</button>
-              ) : (
-                taxBps > 0 && <button className="dtrow-x" onClick={() => setTaxRemoved(true)} aria-label="Remove tax" title="Remove tax from this sale">🗑</button>
-              )}
-            </span>
-            <span>{taxRemoved ? 'Removed' : fmt(totals.taxMinor)}</span>
-          </div>
+          {totals.promotions.map((p) => (
+            <div key={p.name} className="dtrow disc">
+              <span>{p.name}</span>
+              <span>−{fmt(p.amountMinor)}</span>
+            </div>
+          ))}
+          {taxRemoved || totals.taxRows.length <= 1 ? (
+            <div className="dtrow">
+              <span>
+                Tax{totals.taxRows[0] && !taxRemoved ? ` · ${totals.taxRows[0].name} ${(totals.taxRows[0].rateBps / 100).toFixed(2).replace(/\.?0+$/, '')}%` : ''}{totals.taxInclusive && !taxRemoved ? ' (included)' : ''}
+                {taxRemoved ? (
+                  <button className="dtrow-link" onClick={() => setTaxRemoved(false)}>Restore</button>
+                ) : (
+                  (taxBps > 0 || totals.taxRows.length > 0) && <button className="dtrow-x" onClick={() => setTaxRemoved(true)} aria-label="Remove tax" title="Remove tax from this sale">🗑</button>
+                )}
+              </span>
+              <span>{taxRemoved ? 'Removed' : fmt(totals.taxMinor)}</span>
+            </div>
+          ) : (
+            totals.taxRows.map((r) => (
+              <div key={r.id} className="dtrow">
+                <span>
+                  {r.name} {(r.rateBps / 100).toFixed(2).replace(/\.?0+$/, '')}%{totals.taxInclusive ? ' (included)' : ''}
+                  <button className="dtrow-x" onClick={() => setTaxRemoved(true)} aria-label="Remove tax" title="Remove tax from this sale">🗑</button>
+                </span>
+                <span>{fmt(r.amountMinor)}</span>
+              </div>
+            ))
+          )}
           {openSale && (
             <>
               <div className="dtrow">
@@ -221,6 +268,21 @@ export function RegisterCart({ onPay }: { onPay: () => void }) {
       {showNote && (
         <div className="dcart-extra">
           <textarea value={orderNote} onChange={(e) => setOrderNote(e.target.value)} placeholder="Add a note to this sale" />
+          {saleFields.map((f) => (
+            <label key={f.id} className="dcart-cf">
+              <span>{f.name}</span>
+              {f.type === 'Checkbox' ? (
+                <input type="checkbox" checked={customFields[f.id] === 'yes'} onChange={(e) => setCustomFields({ ...customFields, [f.id]: e.target.checked ? 'yes' : '' })} />
+              ) : f.type === 'Dropdown' ? (
+                <select value={customFields[f.id] ?? ''} onChange={(e) => setCustomFields({ ...customFields, [f.id]: e.target.value })}>
+                  <option value="">—</option>
+                  {f.options.map((o) => <option key={o}>{o}</option>)}
+                </select>
+              ) : (
+                <input type={f.type === 'Date' ? 'date' : f.type === 'Number' ? 'number' : 'text'} value={customFields[f.id] ?? ''} onChange={(e) => setCustomFields({ ...customFields, [f.id]: e.target.value })} />
+              )}
+            </label>
+          ))}
         </div>
       )}
       {promoOpen && (
@@ -244,6 +306,22 @@ export function RegisterCart({ onPay }: { onPay: () => void }) {
         <span className="dpay-amt">{fmt(toPay)}</span>
       </button>
 
+      {serialLine && (
+        <div className="pm-overlay" onClick={() => setLineSerial(serialLine.lineId, '')}>
+          <div className="pm reg-open" onClick={(e) => e.stopPropagation()} role="dialog">
+            <div className="pm-head">
+              <h2>Serial number</h2>
+              <button className="pm-close" onClick={() => setLineSerial(serialLine.lineId, '')} aria-label="Close">×</button>
+            </div>
+            <div className="reg-open-body">
+              <p className="reg-open-text">Which <b>{serialLine.name}</b> is being sold? Choose its serial number, or scan it.</p>
+              <SerialPicker choices={serialChoices.map((c) => c.serial)} onPick={(serial) => setLineSerial(serialLine.lineId, serial)} />
+              <button className="btn-s" onClick={() => setLineSerial(serialLine.lineId, '')}>No serial number</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {discountOpen && (
         <DiscountModal
           bps={discountBps}
@@ -262,6 +340,8 @@ export function RegisterCart({ onPay }: { onPay: () => void }) {
             const created = addCustomer({ ...c, code: `${c.firstName.toLowerCase() || 'cust'}-${String(Date.now()).slice(-4)}`, storeCreditMinor: 0, loyaltyMinor: 0, accountMinor: 0 });
             setCustomer(fullName(created));
             setNewCustomer(null);
+            const outcome = runRules('Customer added', { customerName: fullName(created) });
+            if (outcome.messages.length) setNotice(outcome.messages.join(' · '));
           }}
         />
       )}
@@ -345,6 +425,25 @@ function QuickCustomerModal({ name, groups, onCreate, onClose }: { name: string;
         </form>
       </div>
     </div>
+  );
+}
+
+/** Pick from the serials in stock, or type / scan one. */
+function SerialPicker({ choices, onPick }: { choices: string[]; onPick: (serial: string) => void }) {
+  const [typed, setTyped] = useState('');
+  const q = typed.trim().toLowerCase();
+  const shown = choices.filter((c) => !q || c.toLowerCase().includes(q)).slice(0, 12);
+  return (
+    <>
+      <label className="reg-open-field">
+        <span>Scan or type a serial</span>
+        <input value={typed} autoFocus onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && typed.trim()) onPick(typed.trim()); }} placeholder="Serial number" />
+      </label>
+      <div className="reg-userlist">
+        {shown.map((c) => <button key={c} className="btn-s" onClick={() => onPick(c)}>{c}</button>)}
+        {shown.length === 0 && <span className="pe-muted">{choices.length ? 'No serials match.' : 'No serials on file for this product.'}</span>}
+      </div>
+    </>
   );
 }
 

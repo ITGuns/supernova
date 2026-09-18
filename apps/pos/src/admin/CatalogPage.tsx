@@ -4,6 +4,8 @@ import { downloadCsv } from '../lib/csv';
 import { fmt } from '../lib/format';
 import { useInventory } from '../store/inventoryStore';
 import { ProductRowPanel } from './ProductRowPanel';
+import { newGiftCardNumber, useGiftCards } from '../store/giftCardStore';
+import { MoneyInput } from './NumInput';
 import { ContextNav, type ContextItem } from '../shell/ContextNav';
 import { useAdjustmentReasons, type AdjustmentType } from '../store/adjustmentReasonsStore';
 import { DEFAULT_CATEGORY_ID, categoryDescendantIds, categoryLabel, sortedCategories, useCatalogMeta } from '../store/catalogMetaStore';
@@ -150,6 +152,12 @@ export function CatalogPage() {
 
   // Import Modal state
   const transactions = useInventory((s) => s.transactions);
+  const giftCards = useGiftCards((s) => s.cards);
+  const issueGiftCard = useGiftCards((s) => s.issue);
+  const cancelGiftCard = useGiftCards((s) => s.cancel);
+  const [gcNumber, setGcNumber] = useState('');
+  const [gcAmount, setGcAmount] = useState(2500);
+  const [gcOpen, setGcOpen] = useState(false);
   const [poQ, setPoQ] = useState('');
   // Lightspeed applies the product filters when you press Search (or Enter);
   // `pending` holds what's typed, the individual states hold what's applied.
@@ -650,15 +658,39 @@ export function CatalogPage() {
               <div className="gc-hero">
                 <h2>Sell gift cards to boost revenue</h2>
                 <p>Bring in new customers and increase revenue with flexible and brandable gift cards</p>
-                <button
-                  className="btn-p gc-hero-btn"
-                  onClick={() => {
-                    setQ('Gift Card');
-                    setActive('products');
-                  }}
-                >
-                  Get started
+                <button className="btn-p gc-hero-btn" onClick={() => { setGcOpen(true); setGcNumber(newGiftCardNumber(giftCards)); }}>
+                  Add gift card
                 </button>
+              </div>
+              <div className="page-subbar">Sell gift cards at the register from More actions → Sell gift card. Cards on file can be redeemed on the Pay screen.</div>
+              {gcOpen && (
+                <div className="add-bar">
+                  <input className="set-input" value={gcNumber} onChange={(e) => setGcNumber(e.target.value)} placeholder="Card number" style={{ flex: 1 }} />
+                  <span className="pe-money"><span>$</span><MoneyInput className="set-input" minor={gcAmount} onChange={setGcAmount} /></span>
+                  <button className="btn-p" disabled={!gcNumber.trim() || gcAmount <= 0} onClick={() => { issueGiftCard(gcNumber.trim(), gcAmount); setGcOpen(false); }}>Activate card</button>
+                  <button className="btn-s" onClick={() => setGcOpen(false)}>Cancel</button>
+                </div>
+              )}
+              <div className="ctable">
+                <div className="cthead gc6">
+                  <span>Card number</span>
+                  <span className="r">Issued</span>
+                  <span className="r">Balance</span>
+                  <span>Customer</span>
+                  <span>Status</span>
+                  <span>Sale</span>
+                </div>
+                {giftCards.length === 0 && <div className="ct-empty">No gift cards on file yet.</div>}
+                {giftCards.map((c) => (
+                  <div key={c.id} className="ctrow gc6">
+                    <span>••••{c.number.slice(-4)} <span className="ct-muted">({c.number})</span></span>
+                    <span className="r">{fmt(c.initialMinor)}</span>
+                    <span className="r">{fmt(c.balanceMinor)}</span>
+                    <span>{c.customerName || '—'}</span>
+                    <span><span className={`tx-badge ${c.status === 'Active' ? 'received' : c.status === 'Redeemed' ? 'open' : 'cancelled'}`}>{c.status}</span>{c.status === 'Active' && <span className="rlink" style={{ marginLeft: 8 }} onClick={() => cancelGiftCard(c.id)}>Cancel</span>}</span>
+                    <span className="ct-muted">{c.saleOrderNumber || `Issued ${new Date(c.createdAt).toLocaleDateString()}`}</span>
+                  </div>
+                ))}
               </div>
               <div className="gc-features">
                 <div className="gc-feature">

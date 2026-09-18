@@ -10,6 +10,7 @@ import { STORE_CREDIT, isCash, methodOf, tenderLabel } from '../lib/tenders';
 import { useInventory } from '../store/inventoryStore';
 import { useSharedReports } from '../store/sharedReportsStore';
 import { fmtMinutes, minutesWorked, useTimeEntries } from '../store/timeEntryStore';
+import { useGiftCards } from '../store/giftCardStore';
 import { useSetup } from '../store/setupStore';
 import { useSettings } from '../store/settingsStore';
 import { useAdjustmentReasons } from '../store/adjustmentReasonsStore';
@@ -430,6 +431,26 @@ export function ReportingPage() {
     };
   }, [salesFiltered, allProducts]);
 
+  // Sales by product / by outlet for the report type selector.
+  const salesByProduct = useMemo(() => {
+    const m = new Map<string, { rev: number; qty: number; cogs: number; tax: number }>();
+    for (const sale of salesFiltered) {
+      const gross = sale.lines.reduce((a, l) => a + l.unitPriceMinor * l.quantity, 0);
+      for (const l of sale.lines) {
+        const value = l.unitPriceMinor * l.quantity * (1 - (l.discountPct ?? 0) / 100);
+        const share = gross > 0 ? value / gross : 0;
+        const cur = m.get(l.name) ?? { rev: 0, qty: 0, cogs: 0, tax: 0 };
+        cur.rev += Math.round(saleRevenue(sale) * share);
+        cur.qty += l.quantity;
+        cur.cogs += (l.costMinor ?? allProducts.find((p) => p.id === l.variantId)?.supplierPriceMinor ?? 0) * l.quantity;
+        cur.tax += Math.round((sale.taxMinor ?? 0) * share);
+        m.set(l.name, cur);
+      }
+    }
+    return [...m.entries()].sort((a, b) => b[1].rev - a[1].rev);
+  }, [salesFiltered, allProducts]);
+  const salesByOutlet = useMemo(() => [{ name: outlet === 'All outlets' ? 'Main Outlet' : outlet, ...salesMetrics, count: salesFiltered.length }], [outlet, salesMetrics, salesFiltered.length]);
+
   // Individual performance: what each staff member sold in the range.
   const salesByUser = useMemo(() => {
     const m = new Map<string, { rev: number; count: number; items: number; profit: number }>();
@@ -734,19 +755,12 @@ export function ReportingPage() {
   const cashRemoved = cashFiltered.filter((r) => r.type === 'REMOVE').reduce((a, r) => a + r.amountMinor, 0);
 
   // Gift cards: sale lines whose product name contains "gift card".
-  const giftLines = useMemo(() => {
-    const rows: { order: string; at: number; qty: number; amountMinor: number }[] = [];
-    for (const s of sales)
-      for (const l of s.lines)
-        if (l.name.toLowerCase().includes('gift card'))
-          rows.push({ order: s.orderNumber, at: s.at, qty: l.quantity, amountMinor: l.unitPriceMinor * l.quantity });
-    return rows.sort((a, b) => b.at - a.at);
-  }, [sales]);
-  const gcFiltered = giftLines.filter(
-    (g) => gcQuery.trim() === '' || g.order.toLowerCase().includes(gcQuery.trim().toLowerCase()),
-  );
-  const gcSold = giftLines.reduce((a, g) => a + g.amountMinor, 0);
-  const gcCount = giftLines.reduce((a, g) => a + g.qty, 0);
+  const giftCards = useGiftCards((s) => s.cards);
+  const gcFiltered = giftCards.filter((c) => gcQuery.trim() === '' || c.number.includes(gcQuery.replace(/[\s-]/g, '')));
+  const gcSold = giftCards.reduce((a, c) => a + c.initialMinor, 0);
+  const gcRedeemed = giftCards.reduce((a, c) => a + (c.initialMinor - c.balanceMinor), 0);
+  const gcOutstanding = giftCards.filter((c) => c.status === 'Active').reduce((a, c) => a + c.balanceMinor, 0);
+  const gcCount = giftCards.filter((c) => c.status === 'Active').length;
 
   // Store credit: outstanding balances held by customers.
   const creditCustomers = customers.filter((c) => c.storeCreditMinor > 0);
@@ -958,8 +972,8 @@ export function ReportingPage() {
               </div>
               <div className="gc-stats">
                 <div className="gc-stat"><span>Total value sold</span><b>{fmt(gcSold)}</b></div>
-                <div className="gc-stat"><span>Total value redeemed</span><b>{fmt(0)}</b></div>
-                <div className="gc-stat"><span>Outstanding balance</span><b>{fmt(gcSold)}</b></div>
+                <div className="gc-stat"><span>Total value redeemed</span><b>{fmt(gcRedeemed)}</b></div>
+                <div className="gc-stat"><span>Outstanding balance</span><b>{fmt(gcOutstanding)}</b></div>
                 <div className="gc-stat"><span>Gift cards in circulation</span><b>{gcCount}</b></div>
               </div>
               <div className="rep-toolbar">
@@ -968,8 +982,8 @@ export function ReportingPage() {
                   className="rlink"
                   onClick={() =>
                     downloadCSV('gift-cards.csv', [
-                      ['Gift card (sale)', 'Total sold', 'Total redeemed', 'Balance'],
-                      ...gcFiltered.map((g) => [g.order, (g.amountMinor / 100).toFixed(2), '0.00', (g.amountMinor / 100).toFixed(2)]),
+                      ['Gift card', 'Sale', 'Status', 'Total sold', 'Total redeemed', 'Balance'],
+                      ...gcFiltered.map((c) => [c.number, c.saleOrderNumber, c.status, (c.initialMinor / 100).toFixed(2), ((c.initialMinor - c.balanceMinor) / 100).toFixed(2), (c.balanceMinor / 100).toFixed(2)]),
                     ])
                   }
                 >
@@ -984,14 +998,14 @@ export function ReportingPage() {
                   ) : gcFiltered.length === 0 ? (
                     <div className="cm-empty">No gift cards found for this period</div>
                   ) : (
-                    gcFiltered.map((g, i) => (
-                      <div key={`${g.order}-${i}`} className="gc-row">
+                    gcFiltered.map((c) => (
+                      <div key={c.id} className="gc-row">
                         <span>
-                          {g.order} <span className="prod-sku">{fmtDateTime(new Date(g.at))}</span>
+                          ••••{c.number.slice(-4)} <span className="prod-sku">{c.saleOrderNumber ? `Sale ${c.saleOrderNumber} · ` : ''}{fmtDateTime(new Date(c.createdAt))} · {c.status}</span>
                         </span>
-                        <span className="r">{fmt(g.amountMinor)}</span>
-                        <span className="r">{fmt(0)}</span>
-                        <span className="r">{fmt(g.amountMinor)}</span>
+                        <span className="r">{fmt(c.initialMinor)}</span>
+                        <span className="r">{fmt(c.initialMinor - c.balanceMinor)}</span>
+                        <span className="r">{fmt(c.balanceMinor)}</span>
                       </div>
                     ))
                   )}
@@ -1196,6 +1210,45 @@ export function ReportingPage() {
                         );
                       })}
                     </div>
+                  )}
+                </div>
+              ) : salesTab === 'summary' && salesReport !== 'Sales summary' ? (
+                <div className="rep-table wide">
+                  <div className="rep-table-h">{salesReport}</div>
+                  <div className="tsp-head">
+                    <span>{salesReport === 'Sales by product' ? 'Product' : 'Outlet'}</span>
+                    <span className="r">Revenue</span>
+                    <span className="r">{salesReport === 'Sales by product' ? 'Items sold' : 'Sale count'}</span>
+                    <span className="r">Cost of goods sold</span>
+                    <span className="r">Gross profit</span>
+                    <span className="r">Tax</span>
+                  </div>
+                  {salesReport === 'Sales by product' ? (
+                    salesByProduct.length === 0 ? (
+                      <div className="rep-empty">No data available for this period.</div>
+                    ) : (
+                      salesByProduct.map(([name, v]) => (
+                        <div key={name} className="tsp-row">
+                          <span className="rlink">{name}</span>
+                          <span className="r">{fmt(v.rev)}</span>
+                          <span className="r">{v.qty}</span>
+                          <span className="r">{fmt(v.cogs)}</span>
+                          <span className="r">{fmt(v.rev - v.cogs)}</span>
+                          <span className="r">{fmt(v.tax)}</span>
+                        </div>
+                      ))
+                    )
+                  ) : (
+                    salesByOutlet.map((o) => (
+                      <div key={o.name} className="tsp-row">
+                        <span className="rlink">{o.name}</span>
+                        <span className="r">{fmt(o.revenue)}</span>
+                        <span className="r">{o.count}</span>
+                        <span className="r">{fmt(o.cogs)}</span>
+                        <span className="r">{fmt(o.profit)}</span>
+                        <span className="r">{fmt(o.tax)}</span>
+                      </div>
+                    ))
                   )}
                 </div>
               ) : salesTab === 'summary' ? (

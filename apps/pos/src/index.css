@@ -6523,3 +6523,27 @@ input {
     linear-gradient(90deg, rgba(5, 6, 15, 0.55) 0%, rgba(5, 6, 15, 0.15) 45%, rgba(5, 6, 15, 0) 70%),
     linear-gradient(0deg, rgba(5, 6, 15, 0.6) 0%, rgba(5, 6, 15, 0) 40%);
 }
+
+/* Notifications */
+.topbar-bell { position: relative; }
+.topbar-badge { position: absolute; top: 2px; right: 2px; min-width: 16px; height: 16px; border-radius: 8px; background: var(--bad); color: #fff; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; padding: 0 4px; }
+.nd-actions { float: right; display: inline-flex; gap: 12px; font-size: 13px; font-weight: 400; }
+.nd-list { display: flex; flex-direction: column; gap: 8px; padding: 8px 16px 16px; overflow: auto; }
+.nd-item { display: flex; gap: 8px; align-items: flex-start; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--panel); }
+.nd-item.unread { border-color: var(--primary); }
+.nd-item-body { display: flex; flex-direction: column; gap: 3px; flex: 1; font-size: 13px; cursor: default; }
+.nd-item-body[role='button'] { cursor: pointer; }
+.nd-time { font-size: 11px; color: var(--muted); }
+.nd-x { border: 0; background: none; cursor: pointer; color: var(--muted); font-size: 16px; }
+
+/* Role denial + inactivity lock */
+.perm-denied { max-width: 520px; margin: 80px auto; padding: 32px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); text-align: center; display: flex; flex-direction: column; gap: 12px; align-items: center; }
+.perm-denied h1 { font-size: 20px; margin: 0; }
+.perm-denied p { color: var(--muted); margin: 0; }
+.lock-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(10, 10, 20, 0.72); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+.lock-card { width: min(420px, 92vw); background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 12px; color: var(--text); }
+.lock-title { font-size: 18px; font-weight: 700; }
+.lock-text { font-size: 14px; color: var(--muted); }
+.lock-card input { height: 42px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--text); padding: 0 12px; font: inherit; }
+.lock-err { color: var(--bad); font-size: 13px; }
+.lock-actions { display: flex; justify-content: space-between; gap: 10px; }

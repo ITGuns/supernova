@@ -5,6 +5,7 @@ import { useCart, type CartLine } from '../store/cartStore';
 import { useCustomers } from '../store/customerStore';
 import { useProducts } from '../store/productStore';
 import { useServices, type Service, type ServiceItem } from '../store/serviceStore';
+import { useCustomFields } from '../store/customFieldStore';
 import { useSetup } from '../store/setupStore';
 import { useUsers } from '../store/userStore';
 import { Field, Section } from './FormLayout';
@@ -34,6 +35,7 @@ interface Draft {
   scheduledAt: number | null;
   status: string;
   lines: CartLine[];
+  customFields: Record<string, string>;
 }
 
 export function ServiceEditor() {
@@ -68,7 +70,9 @@ export function ServiceEditor() {
     scheduledAt: existing?.scheduledAt ?? null,
     status: existing?.status ?? 'New',
     lines: existing?.lines ?? preset?.lines ?? [],
+    customFields: { ...(existing?.customFields ?? {}) },
   }));
+  const serviceFields = useCustomFields((s) => s.fields).filter((f) => f.application === 'Services');
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [note, setNote] = useState('');
@@ -223,6 +227,27 @@ export function ServiceEditor() {
             </Field>
           </div>
         </Section>
+
+        {serviceFields.length > 0 && (
+          <Section title="Custom fields" hint="Extra details your store captures on services (Setup → Workflows → Custom fields).">
+            <div className="pe-grid2">
+              {serviceFields.map((f) => (
+                <Field key={f.id} label={f.name}>
+                  {f.type === 'Checkbox' ? (
+                    <label className="pe-check"><input type="checkbox" checked={draft.customFields[f.id] === 'yes'} onChange={(e) => set({ customFields: { ...draft.customFields, [f.id]: e.target.checked ? 'yes' : '' } })} /><span>Yes</span></label>
+                  ) : f.type === 'Dropdown' ? (
+                    <select className="pe-input" value={draft.customFields[f.id] ?? ''} onChange={(e) => set({ customFields: { ...draft.customFields, [f.id]: e.target.value } })}>
+                      <option value="">—</option>
+                      {f.options.map((o) => <option key={o}>{o}</option>)}
+                    </select>
+                  ) : (
+                    <input className="pe-input" type={f.type === 'Date' ? 'date' : f.type === 'Number' ? 'number' : 'text'} value={draft.customFields[f.id] ?? ''} onChange={(e) => set({ customFields: { ...draft.customFields, [f.id]: e.target.value } })} />
+                  )}
+                </Field>
+              ))}
+            </div>
+          </Section>
+        )}
 
         <Section title="Products and charges" hint="Parts used and labour to charge for. These go onto the sale when you choose Add to sale.">
           <div className="pe-searchwrap">

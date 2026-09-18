@@ -5,6 +5,7 @@ import { computeTotals } from '../lib/totals';
 import { useCart } from '../store/cartStore';
 import { useQuotes, type QuoteStatus } from '../store/quotesStore';
 import { useSettings } from '../store/settingsStore';
+import { useCustomers } from '../store/customerStore';
 import { BagClock } from '../admin/illustrations';
 import '../styles/sell.css';
 
@@ -24,6 +25,7 @@ export function Quotes() {
   const orderDiscountBps = useCart((s) => s.orderDiscountBps);
   const customerName = useCart((s) => s.customerName);
   const taxBps = useSettings((s) => s.defaultTaxRateBps);
+  const customers = useCustomers((s) => s.customers);
   const [status, setStatus] = useState<Filter>('Open');
   const [customer, setCustomer] = useState('');
   const [num, setNum] = useState('');
@@ -121,11 +123,21 @@ export function Quotes() {
                       </div>
                     ))}
                     {x.note && <div className="qt-muted">Note: {x.note}</div>}
-                    {emailed === x.id && <div className="qt-muted">Quote emailed to {x.customer}.</div>}
+                    {emailed === x.id && <div className="qt-muted">Quote opened in your mail app for {x.customer}.</div>}
                   </div>
                   <div className="qt-actions2">
                     {x.status === 'Open' && <button className="btn-p" onClick={() => convert(x.id)}>Convert to sale</button>}
-                    <button className="btn-s" onClick={() => setEmailed(x.id)}>Email quote</button>
+                    <button
+                      className="btn-s"
+                      onClick={() => {
+                        const to = customers.find((c) => `${c.firstName} ${c.lastName}`.trim() === x.customer)?.email ?? '';
+                        const body = [`Quote ${x.num}`, `Valid until ${date(x.expiresAt)}`, '', ...x.lines.map((l) => `${l.quantity} x ${l.name}  ${fmt(l.unitPriceMinor * l.quantity)}`), '', `TOTAL ${fmt(x.totalMinor)}`, x.note ? `\n${x.note}` : ''].join('\n');
+                        window.location.href = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(`Quote ${x.num}`)}&body=${encodeURIComponent(body)}`;
+                        setEmailed(x.id);
+                      }}
+                    >
+                      Email quote
+                    </button>
                     <button className="btn-s" onClick={() => window.print()}>Print quote</button>
                     {x.status !== 'Archived' && (
                       confirmArchive === x.id ? (

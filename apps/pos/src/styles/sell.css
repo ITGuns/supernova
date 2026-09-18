@@ -293,3 +293,12 @@ select.sh-input {
 .rcpt-emailform { display: flex; gap: 8px; margin: 12px 0 0; }
 .rcpt-emailform input { flex: 1; height: 36px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); padding: 0 10px; font: inherit; }
 .rcpt-actions { flex-wrap: wrap; }
+.dcart-notice { background: rgba(240, 197, 60, 0.18); }
+.dcart-cf { display: grid; grid-template-columns: 1fr 1.4fr; gap: 8px; align-items: center; font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+.dcart-cf input, .dcart-cf select { height: 32px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); padding: 0 8px; font: inherit; font-size: 13px; }
+.rcpt-notice { margin: 8px 0; padding: 8px 12px; border-radius: 8px; background: rgba(240, 197, 60, 0.18); color: var(--text); font-size: 13px; text-align: left; }
+.sh-ret-line { align-items: center; }
+.sh-ret-qty { display: inline-flex; align-items: center; gap: 6px; }
+.sh-ret-qty input { width: 64px; height: 32px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); padding: 0 8px; text-align: right; font: inherit; }
+.sh-edit-tender { display: grid; grid-template-columns: 1.4fr 1.4fr 0.6fr; gap: 8px; align-items: center; margin: 8px 0; }
+.sh-edit-tender select, .sh-edit-tender input { height: 34px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); padding: 0 8px; font: inherit; }

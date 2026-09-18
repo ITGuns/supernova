@@ -8,6 +8,9 @@ import { stockLinesFor, useProducts } from './productStore';
 import { bestPromotion, promoLabel, usePromotions } from './promotionStore';
 import { useRegister } from './registerStore';
 import { useUsers } from './userStore';
+import { useSerialNumbers } from './serialNumberStore';
+import { useGiftCards } from './giftCardStore';
+import { runRules } from '../lib/rules';
 import { dbSales, dbParked } from '../lib/db';
 
 export interface CartLine {
@@ -31,6 +34,19 @@ export interface CartLine {
   soldBy?: string;
   /** Lines of a continued layaway / on-account sale can't be edited. */
   locked?: boolean;
+  /** Serial number of the unit being sold (serialised products). */
+  serial?: string;
+  /** A gift card being sold: activated for the line's price when the sale completes. */
+  giftCard?: { number: string };
+}
+
+export type FulfillmentKind = 'pack' | 'pickup' | 'delivery';
+export type SaleFulfillmentStatus = 'Unfulfilled' | 'Fulfilled' | 'Cancelled';
+export interface SaleFulfillment {
+  kind: FulfillmentKind;
+  status: SaleFulfillmentStatus;
+  note?: string;
+  updatedAt?: number;
 }
 
 /** The customer group of the customer attached to the sale, by name. */
@@ -99,6 +115,8 @@ export interface SaleLine {
   discountPct?: number;
   note?: string;
   soldBy?: string;
+  serial?: string;
+  giftCard?: { number: string };
 }
 
 /**
@@ -106,7 +124,7 @@ export interface SaleLine {
  * all, continued from Sales history. Returned: refunded. Voided: cancelled
  * without a refund (stock back, payments dropped from reports).
  */
-export type SaleStatus = 'Completed' | 'Returned' | 'Voided' | 'Layaway' | 'On account';
+export type SaleStatus = 'Completed' | 'Returned' | 'Partially returned' | 'Voided' | 'Layaway' | 'On account';
 
 export interface CompletedSale {
   orderNumber: string;
@@ -132,12 +150,39 @@ export interface CompletedSale {
   voidedAt?: number;
   /** Reference typed for a check / other payment type. */
   emailReceipt?: boolean;
+  /** Pack / pickup / delivery order attached at the register. */
+  fulfillment?: SaleFulfillment;
+  /** Units returned so far, by line index (partial returns). */
+  returnedLines?: Record<string, number>;
+  /** Values of the sale's custom fields (Setup → Workflows). */
+  customFields?: Record<string, string>;
 }
+
+/** Units of a line that have been returned. */
+export const returnedQty = (s: CompletedSale, index: number): number => s.returnedLines?.[String(index)] ?? 0;
+/** What has been refunded on the sale so far. */
+export const saleRefunded = (s: CompletedSale): number => (s.refundTenders ?? []).reduce((a, t) => a + t.amountMinor, 0);
+/** Value of a line after its own discount (before order discount and tax). */
+export const lineValue = (l: SaleLine, qty = l.quantity): number => Math.round(l.unitPriceMinor * qty * (1 - (l.discountPct ?? 0) / 100));
+/**
+ * What returning `items` refunds: each line's share of the sale total (so
+ * order discounts and tax come off proportionally).
+ */
+export const refundAmountFor = (s: CompletedSale, items: { index: number; quantity: number }[]): number => {
+  const gross = s.lines.reduce((a, l) => a + lineValue(l), 0);
+  if (gross <= 0) return 0;
+  const value = items.reduce((a, it) => {
+    const l = s.lines[it.index];
+    return a + (l ? lineValue(l, it.quantity) : 0);
+  }, 0);
+  const remaining = s.totalMinor - saleRefunded(s);
+  return Math.min(remaining, Math.round((s.totalMinor * value) / gross));
+};
 
 /** What is still owed on a sale. */
 export const saleBalance = (s: CompletedSale): number =>
   s.status === 'Layaway' || s.status === 'On account' ? Math.max(0, s.totalMinor - (s.paidMinor ?? 0)) : 0;
-/** Sales that count as revenue: not returned, not voided. */
+/** Sales that count as revenue: not returned, not voided (partial returns still count for what was kept). */
 export const saleCounts = (s: CompletedSale): boolean => s.status !== 'Returned' && s.status !== 'Voided';
 
 /**
@@ -145,20 +190,35 @@ export const saleCounts = (s: CompletedSale): boolean => s.status !== 'Returned'
  * Cash is net of the change handed over at the sale, so the refund total
  * always equals the sale total.
  */
-export const refundFor = (sale: CompletedSale): Tender[] => {
+export const refundFor = (sale: CompletedSale, amountMinor?: number): Tender[] => {
   const byMethod = new Map<TenderMethod, number>();
   for (const t of sale.tenders) byMethod.set(t.method, (byMethod.get(t.method) ?? 0) + t.amountMinor);
   // Cash is net of the change handed over at the sale.
   if (byMethod.has('CASH')) byMethod.set('CASH', (byMethod.get('CASH') ?? 0) - sale.changeMinor);
+  // Anything already refunded comes off each method first.
+  for (const t of sale.refundTenders ?? []) byMethod.set(t.method, (byMethod.get(t.method) ?? 0) - t.amountMinor);
+  const paid = [...byMethod.entries()].filter(([, v]) => v > 0);
+  const paidTotal = paid.reduce((a, [, v]) => a + v, 0);
+  const want = amountMinor === undefined ? paidTotal : Math.min(amountMinor, paidTotal);
   const out: Tender[] = [];
-  for (const [method, amountMinor] of byMethod) if (amountMinor > 0) out.push({ id: uid(), method, amountMinor });
+  let left = want;
+  paid.forEach(([method, v], i) => {
+    const share = i === paid.length - 1 ? left : Math.min(left, Math.round((want * v) / paidTotal));
+    if (share > 0) out.push({ id: uid(), method, amountMinor: share });
+    left -= share;
+  });
   return out;
 };
 
 // ── Sale economics ───────────────────────────────────────────────────────────
 
-/** Revenue excluding tax: what the store actually keeps before costs. */
-export const saleRevenue = (s: CompletedSale): number => s.totalMinor - (s.taxMinor ?? 0);
+/** Revenue excluding tax: what the store actually keeps before costs (net of partial refunds). */
+export const saleRevenue = (s: CompletedSale): number => {
+  const refunded = s.status === 'Partially returned' ? saleRefunded(s) : 0;
+  const net = s.totalMinor - refunded;
+  const taxShare = s.totalMinor > 0 ? Math.round(((s.taxMinor ?? 0) * net) / s.totalMinor) : 0;
+  return net - taxShare;
+};
 
 /**
  * Cost of the goods on a sale. Each line carries the supplier cost at the
@@ -166,9 +226,9 @@ export const saleRevenue = (s: CompletedSale): number => s.totalMinor - (s.taxMi
  * current supplier price.
  */
 export const saleCost = (s: CompletedSale, products: { id: string; supplierPriceMinor?: number }[]): number =>
-  s.lines.reduce((sum, l) => {
+  s.lines.reduce((sum, l, i) => {
     const unit = l.costMinor ?? products.find((p) => p.id === l.variantId)?.supplierPriceMinor ?? 0;
-    return sum + unit * l.quantity;
+    return sum + unit * Math.max(0, l.quantity - (s.status === 'Partially returned' ? returnedQty(s, i) : 0));
   }, 0);
 
 export const saleProfit = (s: CompletedSale, products: { id: string; supplierPriceMinor?: number }[]): number =>
@@ -189,6 +249,14 @@ interface CartState {
   openSaleNumber: string | null;
   customerName: string;
   orderNote: string;
+  /** Pack / pickup / delivery chosen for this sale (Mark as unfulfilled). */
+  fulfillment: { kind: FulfillmentKind; note: string } | null;
+  /** Values typed for the sale's custom fields. */
+  customFields: Record<string, string>;
+  /** A line just added for a serialised product that still needs its serial picked. */
+  pendingSerial: string | null;
+  /** Messages business rules asked the cashier to see after the last sale. */
+  lastSaleNotices: string[];
   lastSale: CompletedSale | null;
   sales: CompletedSale[];
 
@@ -215,6 +283,17 @@ interface CartState {
   assignAllLines: (soldBy: string) => void;
   setCustomer: (name: string) => void;
   setOrderNote: (note: string) => void;
+  setFulfillment: (f: { kind: FulfillmentKind; note: string } | null) => void;
+  setCustomFields: (cf: Record<string, string>) => void;
+  /** Record the serial being sold on a line ('' = none) and close the prompt. */
+  setLineSerial: (lineId: string, serial: string) => void;
+  /** Sell a gift card: a line for the amount that activates the card on completion. */
+  addGiftCardLine: (number: string, amountMinor: number) => void;
+  /** Return some or all items: stock back, refund recorded, status updated. */
+  returnItems: (orderNumber: string, items: { index: number; quantity: number }[], refundTenders: Tender[]) => void;
+  /** Edit payments: swap the tender methods / references of a completed sale (amounts must still add up). */
+  updateTenders: (orderNumber: string, tenders: Tender[]) => void;
+  setFulfillmentStatus: (orderNumber: string, status: SaleFulfillmentStatus) => void;
 
   park: (note?: string) => void;
   retrieve: (id: string) => void;
@@ -246,6 +325,8 @@ let hasRefundColumns = true;
 let hasTaxColumns = true;
 // Whether it has the paid / voided columns from migration 0009.
 let hasPaidColumns = true;
+// Whether it has returned_lines / custom_fields from migration 0011.
+let hasReturnColumns = true;
 
 /** Parse the numeric part of an order label like "#1002" → 1002. */
 const orderNumToInt = (label: string): number => {
@@ -262,7 +343,8 @@ const saleToRow = (s: CompletedSale): Record<string, unknown> => ({
   change_minor: s.changeMinor,
   sold_at: new Date(s.at).toISOString(),
   ...(hasTaxColumns ? { tax_minor: s.taxMinor ?? 0, discount_minor: s.discountMinor ?? 0 } : {}),
-  ...(hasPaidColumns ? { paid_minor: s.paidMinor ?? null, voided_at: s.voidedAt ? new Date(s.voidedAt).toISOString() : null } : {}),
+  ...(hasPaidColumns ? { paid_minor: s.paidMinor ?? null, voided_at: s.voidedAt ? new Date(s.voidedAt).toISOString() : null, fulfillment: s.fulfillment ?? null } : {}),
+  ...(hasReturnColumns ? { returned_lines: s.returnedLines ?? null, custom_fields: s.customFields ?? {} } : {}),
   training: s.training ?? false,
   customer_name: s.customer ?? null,
   note: s.note ?? null,
@@ -294,6 +376,9 @@ const rowToSale = (r: Record<string, unknown>): CompletedSale => ({
   refundedAt: r.refunded_at ? new Date(r.refunded_at as string).getTime() : undefined,
   paidMinor: (r.paid_minor as number | null) ?? undefined,
   voidedAt: r.voided_at ? new Date(r.voided_at as string).getTime() : undefined,
+  fulfillment: (r.fulfillment as SaleFulfillment | null) ?? undefined,
+  returnedLines: (r.returned_lines as Record<string, number> | null) ?? undefined,
+  customFields: (r.custom_fields as Record<string, string> | null) ?? undefined,
 });
 
 // Map a ParkedSale to the parked_sales table row.
@@ -330,6 +415,10 @@ export const useCart = create<CartState>()(
   openSaleNumber: null,
   customerName: '',
   orderNote: '',
+  fulfillment: null,
+  customFields: {},
+  pendingSerial: null,
+  lastSaleNotices: [],
   lastSale: null,
   sales: [],
 
@@ -345,10 +434,12 @@ export const useCart = create<CartState>()(
       hasRefundColumns = 'refund_tenders' in salesRows[0];
       hasTaxColumns = 'tax_minor' in salesRows[0];
       hasPaidColumns = 'paid_minor' in salesRows[0];
+      hasReturnColumns = 'returned_lines' in salesRows[0];
     } else {
-      const [taxProbe, paidProbe] = await Promise.all([dbSales.hasTaxColumns(), dbSales.hasPaidColumns()]);
+      const [taxProbe, paidProbe, returnProbe] = await Promise.all([dbSales.hasTaxColumns(), dbSales.hasPaidColumns(), dbSales.hasReturnedLines()]);
       if (taxProbe !== null) hasTaxColumns = taxProbe;
       if (paidProbe !== null) hasPaidColumns = paidProbe;
+      if (returnProbe !== null) hasReturnColumns = returnProbe;
     }
     // Advance the order counter past every number already in the cloud so a
     // fresh browser (empty localStorage) can never reissue an existing number.
@@ -384,8 +475,27 @@ export const useCart = create<CartState>()(
         quantity: 1,
         ...(priced.priceNote ? { basePriceMinor: priced.basePriceMinor, priceNote: priced.priceNote } : {}),
       };
-      return { lines: [...state.lines, line] };
+      // A product with serial numbers on file asks which unit is being sold.
+      const hasSerials = useSerialNumbers.getState().serials.some((sn) => sn.productId === item.id && sn.status === 'In stock');
+      return { lines: [...state.lines, line], ...(hasSerials ? { pendingSerial: line.lineId } : {}) };
     }),
+
+  setLineSerial: (lineId, serial) =>
+    set((state) => ({
+      pendingSerial: state.pendingSerial === lineId ? null : state.pendingSerial,
+      lines: state.lines.map((l) => (l.lineId === lineId ? { ...l, serial: serial || undefined } : l)),
+    })),
+
+  addGiftCardLine: (number, amountMinor) =>
+    set((state) => ({
+      lines: [
+        ...state.lines,
+        { lineId: uid(), variantId: `giftcard-${uid()}`, name: `Gift card ${number.slice(-4).padStart(number.length > 4 ? 8 : 4, '•')}`, unitPriceMinor: Math.max(0, amountMinor), taxGroupId: 'exempt', quantity: 1, custom: true, giftCard: { number } },
+      ],
+    })),
+
+  setFulfillment: (fulfillment) => set({ fulfillment }),
+  setCustomFields: (customFields) => set({ customFields }),
 
   addCustomLine: ({ name, priceMinor }) =>
     set((state) => ({
@@ -418,7 +528,7 @@ export const useCart = create<CartState>()(
   removeLine: (lineId) =>
     set((state) => ({ lines: state.lines.filter((l) => l.lineId !== lineId) })),
 
-  clear: () => set({ lines: [], orderDiscountBps: 0, orderDiscountMinor: 0, taxRemoved: false, promoCode: '', openSaleNumber: null, customerName: '', orderNote: '' }),
+  clear: () => set({ lines: [], orderDiscountBps: 0, orderDiscountMinor: 0, taxRemoved: false, promoCode: '', openSaleNumber: null, customerName: '', orderNote: '', fulfillment: null, customFields: {}, pendingSerial: null }),
 
   toggleDiscount: () => set((state) => ({ orderDiscountBps: state.orderDiscountBps > 0 ? 0 : 1000, orderDiscountMinor: 0 })),
 
@@ -494,6 +604,9 @@ export const useCart = create<CartState>()(
         openSaleNumber: null,
         customerName: '',
         orderNote: '',
+        fulfillment: null,
+        customFields: {},
+        pendingSerial: null,
         orderSeq: state.orderSeq + 1,
       };
     }),
@@ -534,17 +647,36 @@ export const useCart = create<CartState>()(
 
     const userState = useUsers.getState();
     const soldBy = userState.users.find((u) => u.id === userState.currentUserId)?.name ?? 'Staff';
+    const number = orderNumber(state.orderSeq);
 
     const completed: CompletedSale = {
       ...sale,
-      orderNumber: orderNumber(state.orderSeq),
+      orderNumber: number,
       at: Date.now(),
       training,
       customer: state.customerName || undefined,
       note: state.orderNote || undefined,
       soldBy,
       status: sale.status ?? 'Completed',
+      ...(state.fulfillment ? { fulfillment: { kind: state.fulfillment.kind, status: 'Unfulfilled' as const, note: state.fulfillment.note, updatedAt: Date.now() } } : {}),
+      ...(Object.keys(state.customFields).length ? { customFields: state.customFields } : {}),
     };
+
+    if (!training) {
+      // Serialised units leave stock by serial; gift cards sold are activated for the amount paid.
+      for (const line of state.lines) {
+        if (line.serial) useSerialNumbers.getState().markSold(line.variantId, line.serial, number);
+        if (line.giftCard) useGiftCards.getState().issue(line.giftCard.number, line.unitPriceMinor * line.quantity, { customerName: state.customerName, saleOrderNumber: number });
+      }
+      // Products that just dropped to their reorder point.
+      const prodStore = useProducts.getState();
+      for (const line of state.lines) {
+        const p = prodStore.products.find((x) => x.id === line.variantId);
+        if (!p || p.trackInventory === false) continue;
+        const at = p.replenishMethod === 'reorder' ? p.reorderPoint : p.minQty;
+        if (at != null && p.available <= at) runRules('Product low on stock', { productName: p.name, stock: p.available, user: soldBy });
+      }
+    }
 
     // Persist to Supabase.
     dbSales.insert(saleToRow(completed));
@@ -558,11 +690,69 @@ export const useCart = create<CartState>()(
       openSaleNumber: null,
       customerName: '',
       orderNote: '',
+      fulfillment: null,
+      customFields: {},
+      pendingSerial: null,
       orderSeq: state.orderSeq + 1,
       lastSale: completed,
       sales: [completed, ...state.sales],
     });
     return completed;
+  },
+
+  returnItems: (orderNo, items, refundTenders) => {
+    const state = get();
+    const sale = state.sales.find((s) => s.orderNumber === orderNo);
+    if (!sale || sale.status === 'Returned' || sale.status === 'Voided') return;
+    const returnedLines: Record<string, number> = { ...(sale.returnedLines ?? {}) };
+    const prodStore = useProducts.getState();
+    for (const it of items) {
+      const line = sale.lines[it.index];
+      if (!line) continue;
+      const already = returnedLines[String(it.index)] ?? 0;
+      const qty = Math.max(0, Math.min(it.quantity, line.quantity - already));
+      if (qty === 0) continue;
+      returnedLines[String(it.index)] = already + qty;
+      if (!sale.training) {
+        const prod = line.variantId ? prodStore.products.find((p) => p.id === line.variantId) : prodStore.products.find((p) => p.name === line.name);
+        if (prod) for (const s of stockLinesFor(prod, qty)) prodStore.adjustStock(s.id, -s.delta);
+        if (line.serial && line.variantId) {
+          const sn = useSerialNumbers.getState().serials.find((x) => x.productId === line.variantId && x.serial === line.serial);
+          if (sn) useSerialNumbers.getState().updateSerial(sn.id, { status: 'Returned', soldAt: null, saleOrderNumber: '' });
+        }
+        if (line.giftCard) useGiftCards.getState().redeem(line.giftCard.number, line.unitPriceMinor * qty);
+      }
+    }
+    // Refunds paid back onto a gift card top the card up again.
+    for (const t of refundTenders) if (t.method.startsWith('GIFT:')) useGiftCards.getState().refund(t.method.slice(5), t.amountMinor);
+    const allBack = sale.lines.every((l, i) => (returnedLines[String(i)] ?? 0) >= l.quantity);
+    const refundedAt = Date.now();
+    const allRefunds = [...(sale.refundTenders ?? []), ...refundTenders];
+    const status: SaleStatus = allBack ? 'Returned' : 'Partially returned';
+    dbSales.update(orderNo, {
+      status,
+      ...(hasRefundColumns ? { refund_tenders: allRefunds, refunded_at: new Date(refundedAt).toISOString() } : {}),
+      ...(hasReturnColumns ? { returned_lines: returnedLines } : {}),
+    });
+    set({ sales: state.sales.map((s) => (s.orderNumber === orderNo ? { ...s, status, refundTenders: allRefunds, refundedAt, returnedLines } : s)) });
+    runRules('Refund processed', { totalMinor: refundTenders.reduce((a, t) => a + t.amountMinor, 0), customerName: sale.customer ?? '' });
+  },
+
+  updateTenders: (orderNo, tenders) => {
+    const state = get();
+    const sale = state.sales.find((s) => s.orderNumber === orderNo);
+    if (!sale) return;
+    dbSales.update(orderNo, { tenders });
+    set({ sales: state.sales.map((s) => (s.orderNumber === orderNo ? { ...s, tenders } : s)) });
+  },
+
+  setFulfillmentStatus: (orderNo, status) => {
+    const state = get();
+    const sale = state.sales.find((s) => s.orderNumber === orderNo);
+    if (!sale?.fulfillment) return;
+    const fulfillment: SaleFulfillment = { ...sale.fulfillment, status, updatedAt: Date.now() };
+    if (hasPaidColumns) dbSales.update(orderNo, { fulfillment });
+    set({ sales: state.sales.map((s) => (s.orderNumber === orderNo ? { ...s, fulfillment } : s)) });
   },
 
   voidSale: (orderNo) => {
@@ -651,6 +841,9 @@ export const useCart = create<CartState>()(
       openSaleNumber: null,
       customerName: '',
       orderNote: '',
+      fulfillment: null,
+      customFields: {},
+      pendingSerial: null,
       lastSale: updated,
       sales: state.sales.map((s) => (s.orderNumber === orderNo ? updated : s)),
     });
@@ -658,40 +851,13 @@ export const useCart = create<CartState>()(
   },
 
   markReturned: (orderNo) => {
-    const state = get();
-    const sale = state.sales.find((s) => s.orderNumber === orderNo);
+    const sale = get().sales.find((s) => s.orderNumber === orderNo);
     if (!sale || sale.status === 'Returned') return;
-
-    if (!sale.training) {
-      const prodStore = useProducts.getState();
-      for (const line of sale.lines) {
-        // Prefer the exact variant id; fall back to name for legacy sales
-        // recorded before variantId was persisted.
-        const prod = line.variantId
-          ? prodStore.products.find((p) => p.id === line.variantId)
-          : prodStore.products.find((p) => p.name === line.name);
-        if (!prod) continue;
-        for (const s of stockLinesFor(prod, line.quantity)) prodStore.adjustStock(s.id, -s.delta);
-      }
-    }
-
-    const refundTenders = refundFor(sale);
-    const refundedAt = Date.now();
-    dbSales.update(orderNo, {
-      status: 'Returned',
-      ...(hasRefundColumns
-        ? { refund_tenders: refundTenders, refunded_at: new Date(refundedAt).toISOString() }
-        : {}),
-    });
-
-    set({
-      sales: state.sales.map((s) =>
-        s.orderNumber === orderNo ? { ...s, status: 'Returned' as const, refundTenders, refundedAt } : s,
-      ),
-    });
+    const items = sale.lines.map((l, index) => ({ index, quantity: l.quantity - returnedQty(sale, index) })).filter((it) => it.quantity > 0);
+    get().returnItems(orderNo, items, refundFor(sale, refundAmountFor(sale, items)));
   },
 
-  dismissLastSale: () => set({ lastSale: null }),
+  dismissLastSale: () => set({ lastSale: null, lastSaleNotices: [] }),
     }),
     {
       name: 'nova-cart-v2',

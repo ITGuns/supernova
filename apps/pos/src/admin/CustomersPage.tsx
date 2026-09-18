@@ -3,6 +3,8 @@ import { EMPTY_CUSTOMER_ADDRESS, EMPTY_CUSTOMER_DETAILS, type CustomerAddress, t
 import { normaliseDetails } from '../store/customerStore';
 import { useCustomFields } from '../store/customFieldStore';
 import { useSetup } from '../store/setupStore';
+import { useCart } from '../store/cartStore';
+import { CASH, methodOf } from '../lib/tenders';
 import { MoneyInput } from './NumInput';
 import { useNavigate } from 'react-router-dom';
 import { type CustomerRow } from '../data/customers';
@@ -106,6 +108,27 @@ export function CustomersPage() {
   const [moreFilters, setMoreFilters] = useState(false);
   const [balanceFilter, setBalanceFilter] = useState<'all' | 'credit' | 'account' | 'loyalty'>('all');
   const customFields = useCustomFields((s) => s.fields).filter((f) => f.application === 'Customers');
+  const completeSale = useCart((s) => s.completeSale);
+  const [balanceAction, setBalanceAction] = useState<{ id: string; kind: 'credit' | 'loyalty' | 'account'; amount: number; note: string; method: string } | null>(null);
+  const paymentTypes = useSetup((s) => s.paymentTypes);
+  const applyBalance = () => {
+    if (!balanceAction || balanceAction.amount === 0) return;
+    const c = customers.find((x) => x.id === balanceAction.id);
+    if (!c) return;
+    if (balanceAction.kind === 'credit') updateCust(c.id, { storeCreditMinor: Math.max(0, c.storeCreditMinor + balanceAction.amount) });
+    else if (balanceAction.kind === 'loyalty') updateCust(c.id, { loyaltyMinor: Math.max(0, c.loyaltyMinor + balanceAction.amount) });
+    else {
+      // An account payment is money taken at the register: it clears the balance and shows in takings.
+      const paid = Math.min(c.accountMinor, Math.abs(balanceAction.amount));
+      if (paid > 0) {
+        useCart.setState({ customerName: `${c.firstName} ${c.lastName}`.trim(), orderNote: balanceAction.note || 'On-account payment' });
+        completeSale({ totalMinor: paid, taxMinor: 0, discountMinor: 0, tenders: [{ id: `t-${Date.now()}`, method: balanceAction.method, amountMinor: paid }], changeMinor: 0, lines: [{ name: 'On-account payment', quantity: 1, unitPriceMinor: paid, costMinor: 0 }], status: 'Completed' });
+        updateCust(c.id, { accountMinor: c.accountMinor - paid });
+      }
+    }
+    setNotice(`${c.firstName} ${c.lastName}: ${balanceAction.kind === 'credit' ? 'store credit' : balanceAction.kind === 'loyalty' ? 'loyalty' : 'account'} updated`);
+    setBalanceAction(null);
+  };
   const onAccountEnabled = useSetup((s) => s.onAccountEnabled);
   const groupCreated = useCustomers((s) => s.groupCreated);
   const isNewCust = editingCustId === 'new';
@@ -655,22 +678,42 @@ export function CustomersPage() {
                               </>
                             )}
                             {detailTab === 'Store credit' && (
-                              <div className="cust-p-row">
-                                <span>Balance</span>
-                                <b>{fmt(c.storeCreditMinor)}</b>
-                              </div>
+                              <>
+                                <div className="cust-p-row">
+                                  <span>Balance</span>
+                                  <b>{fmt(c.storeCreditMinor)}</b>
+                                </div>
+                                <div className="cust-p-actions">
+                                  <button className="btn-s" onClick={() => setBalanceAction({ id: c.id, kind: 'credit', amount: 0, note: '', method: CASH })}>Issue store credit</button>
+                                  <span className="cust-p-hint">Store credit is spent on the Pay screen.</span>
+                                </div>
+                              </>
                             )}
                             {detailTab === 'Loyalty' && (
-                              <div className="cust-p-row">
-                                <span>Points</span>
-                                <b>{fmt(c.loyaltyMinor)}</b>
-                              </div>
+                              <>
+                                <div className="cust-p-row">
+                                  <span>Balance</span>
+                                  <b>{fmt(c.loyaltyMinor)}</b>
+                                </div>
+                                <div className="cust-p-actions">
+                                  <button className="btn-s" onClick={() => setBalanceAction({ id: c.id, kind: 'loyalty', amount: 0, note: '', method: CASH })}>Adjust Loyalty</button>
+                                </div>
+                              </>
                             )}
                             {detailTab === 'Account' && (
-                              <div className="cust-p-row">
-                                <span>Balance</span>
-                                <b>{fmt(c.accountMinor)}</b>
-                              </div>
+                              <>
+                                <div className="cust-p-row">
+                                  <span>Balance owing</span>
+                                  <b>{fmt(c.accountMinor)}</b>
+                                </div>
+                                <div className="cust-p-row">
+                                  <span>Limit</span>
+                                  <b>{c.onAccountLimitMinor ? fmt(c.onAccountLimitMinor) : 'Store default'}</b>
+                                </div>
+                                <div className="cust-p-actions">
+                                  <button className="btn-s" disabled={c.accountMinor <= 0} onClick={() => setBalanceAction({ id: c.id, kind: 'account', amount: -c.accountMinor, note: '', method: CASH })}>Receive payment</button>
+                                </div>
+                              </>
                             )}
                             {detailTab === 'Notes' && (
                               <div className="cust-p-row">
@@ -707,6 +750,42 @@ export function CustomersPage() {
         </div>
       </main>
 
+      {balanceAction && (
+        <div className="pm-overlay" onClick={() => setBalanceAction(null)}>
+          <div className="pm reg-open" onClick={(e) => e.stopPropagation()} role="dialog">
+            <div className="pm-head">
+              <h2>{balanceAction.kind === 'credit' ? 'Issue store credit' : balanceAction.kind === 'loyalty' ? 'Adjust Loyalty' : 'Receive on-account payment'}</h2>
+              <button className="pm-close" onClick={() => setBalanceAction(null)} aria-label="Close">×</button>
+            </div>
+            <form className="reg-open-body" onSubmit={(e) => { e.preventDefault(); applyBalance(); }}>
+              <label className="reg-open-field">
+                <span>{balanceAction.kind === 'account' ? 'Amount received' : 'Amount (use a negative amount to take balance away)'}</span>
+                <span className="cm-money"><span>$</span><MoneyInput className="" minor={Math.abs(balanceAction.amount)} onChange={(v) => setBalanceAction({ ...balanceAction, amount: balanceAction.kind === 'account' ? -v : balanceAction.amount < 0 ? -v : v })} autoFocus /></span>
+                {balanceAction.kind !== 'account' && (
+                  <label className="cm-field cm-check" style={{ marginTop: 6 }}>
+                    <input type="checkbox" checked={balanceAction.amount < 0} onChange={(e) => setBalanceAction({ ...balanceAction, amount: e.target.checked ? -Math.abs(balanceAction.amount || 0) : Math.abs(balanceAction.amount || 0) })} />
+                    <span>Deduct instead of add</span>
+                  </label>
+                )}
+              </label>
+              {balanceAction.kind === 'account' && (
+                <label className="reg-open-field">
+                  <span>Paid by</span>
+                  <select value={balanceAction.method} onChange={(e) => setBalanceAction({ ...balanceAction, method: e.target.value })}>
+                    <option value={CASH}>Cash</option>
+                    {paymentTypes.filter((t) => methodOf(t) !== CASH).map((t) => <option key={t.id} value={methodOf(t)}>{t.name}</option>)}
+                  </select>
+                </label>
+              )}
+              <label className="reg-open-field">
+                <span>Note <span className="pe-hint">(Optional)</span></span>
+                <input value={balanceAction.note} onChange={(e) => setBalanceAction({ ...balanceAction, note: e.target.value })} placeholder="e.g. Goodwill for late delivery" />
+              </label>
+              <button className="pm-complete" type="submit" disabled={balanceAction.amount === 0}>{balanceAction.kind === 'account' ? 'Record payment' : 'Apply'}</button>
+            </form>
+          </div>
+        </div>
+      )}
       {editingCustId !== null && (
         <div className="pm-overlay" onClick={() => setEditingCustId(null)}>
           <div className="pm cm-modal" onClick={(e) => e.stopPropagation()}>

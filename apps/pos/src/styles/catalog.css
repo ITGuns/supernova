@@ -334,3 +334,9 @@
 .svc-status { height: 32px; max-width: 190px; margin-right: 6px; }
 .svc-note { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); margin-bottom: 8px; font-size: 14px; }
 .svc-note-meta { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.cthead.gc6, .ctrow.gc6 { grid-template-columns: 2fr 0.8fr 0.8fr 1.2fr 1.2fr 1.2fr; }
+.svc-manage { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: var(--panel); margin: 0 0 14px; }
+.svc-status-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.svc-status-row:last-of-type { border-bottom: 0; }
+.cust-p-actions { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+.cust-p-hint { font-size: 12px; color: var(--muted); }

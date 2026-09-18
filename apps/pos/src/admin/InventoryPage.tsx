@@ -150,12 +150,20 @@ export function InventoryPage() {
   const fulfillments = useFulfillments((s) => s.fulfillments);
   const updateFulfillment = useFulfillments((s) => s.updateFulfillment);
   const loadLines = useCart((s) => s.loadLines);
+  const sales = useCart((s) => s.sales);
+  const setFulfillmentStatus = useCart((s) => s.setFulfillmentStatus);
+  // Paid sales marked pack / pickup / delivery at the register.
+  const saleFulfillments = sales.filter((x) => x.fulfillment).map((x) => ({ sale: x, f: x.fulfillment! }));
   const [fulTab, setFulTab] = useState<'all' | FulfillmentKind>('all');
   const [fulOutlet, setFulOutlet] = useState('all');
   const [fulStatus, setFulStatus] = useState<'all' | FulfillmentStatus>('all');
   const [fulType, setFulType] = useState<'all' | FulfillmentKind>('all');
   const visibleFulfillments = fulfillments.filter(
     (f) => (fulTab === 'all' || f.kind === fulTab) && (fulStatus === 'all' || f.status === fulStatus) && (fulType === 'all' || f.kind === fulType),
+  );
+  const saleStatusOf = (st: string): FulfillmentStatus => (st === 'Unfulfilled' ? 'Open' : st === 'Fulfilled' ? 'Completed' : 'Cancelled');
+  const visibleSaleFulfillments = saleFulfillments.filter(
+    ({ f }) => (fulTab === 'all' || f.kind === fulTab) && (fulStatus === 'all' || saleStatusOf(f.status) === fulStatus) && (fulType === 'all' || f.kind === fulType),
   );
   const outletName = outlets[0] ?? 'Main Outlet';
   // Inventory counts: pull the latest count data from the cloud again.
@@ -173,19 +181,32 @@ export function InventoryPage() {
   const [specialOutlet, setSpecialOutlet] = useState('all');
   const [specialSupplier, setSpecialSupplier] = useState('all');
   const [glossary, setGlossary] = useState(false);
-  const specialRows = fulfillments
-    .filter((f) => f.status === 'Open')
-    .flatMap((f) =>
-      f.lines.map((l) => {
-        const p = products.find((x) => x.id === l.variantId);
-        if (!p) return null;
-        const onHand = availableOf(p, products);
-        if (onHand >= l.quantity) return null;
-        const po = transactions.find((t) => t.kind === 'order' && (t.status === 'Open' || t.status === 'Sent' || t.status === 'Dispatched') && t.lines.some((x) => x.productId === p.id));
-        return { key: `${f.id}-${l.lineId}`, productId: p.id, name: p.name, customer: f.customerName, sale: f.number, supplier: p.supplier, needed: l.quantity - Math.max(0, onHand), onHand, outlet: outletName, ordered: !!po, orderId: po?.id ?? '', orderNumber: po?.number ?? '' };
-      }),
-    )
-    .filter((r): r is NonNullable<typeof r> => r !== null);
+  const openPo = (productId: string) => transactions.find((t) => t.kind === 'order' && (t.status === 'Open' || t.status === 'Sent' || t.status === 'Dispatched') && t.lines.some((x) => x.productId === productId));
+  const specialRows = [
+    ...fulfillments
+      .filter((f) => f.status === 'Open')
+      .flatMap((f) =>
+        f.lines.map((l) => {
+          const p = products.find((x) => x.id === l.variantId);
+          if (!p) return null;
+          const onHand = availableOf(p, products);
+          if (onHand >= l.quantity) return null;
+          const po = openPo(p.id);
+          return { key: `${f.id}-${l.lineId}`, productId: p.id, name: p.name, customer: f.customerName, sale: f.number, supplier: p.supplier, needed: l.quantity - Math.max(0, onHand), onHand, outlet: outletName, ordered: !!po, orderId: po?.id ?? '', orderNumber: po?.number ?? '' };
+        }),
+      ),
+    // Paid, unfulfilled sales whose products are out of stock still need ordering.
+    ...saleFulfillments
+      .filter(({ f }) => f.status === 'Unfulfilled')
+      .flatMap(({ sale: x }) =>
+        x.lines.map((l, i) => {
+          const p = l.variantId ? products.find((y) => y.id === l.variantId) : undefined;
+          if (!p || availableOf(p, products) > 0) return null;
+          const po = openPo(p.id);
+          return { key: `${x.orderNumber}-${i}`, productId: p.id, name: p.name, customer: x.customer ?? '', sale: x.orderNumber, supplier: p.supplier, needed: l.quantity, onHand: 0, outlet: outletName, ordered: !!po, orderId: po?.id ?? '', orderNumber: po?.number ?? '' };
+        }),
+      ),
+  ].filter((r): r is NonNullable<typeof r> => r !== null);
   const visibleSpecial = specialRows.filter(
     (r) => (specialTab === 'ordered') === r.ordered && (specialOutlet === 'all' || r.outlet === specialOutlet) && (specialSupplier === 'all' || r.supplier === specialSupplier),
   );
@@ -719,13 +740,13 @@ export function InventoryPage() {
                   All
                 </button>
                 <button className={`sh-tab ${fulTab === 'pack' ? 'active' : ''}`} onClick={() => setFulTab('pack')}>
-                  Pack orders ({fulfillments.filter((f) => f.kind === 'pack' && f.status === 'Open').length})
+                  Pack orders ({fulfillments.filter((f) => f.kind === 'pack' && f.status === 'Open').length + saleFulfillments.filter(({ f }) => f.kind === 'pack' && f.status === 'Unfulfilled').length})
                 </button>
                 <button className={`sh-tab ${fulTab === 'pickup' ? 'active' : ''}`} onClick={() => setFulTab('pickup')}>
-                  Customer pickup ({fulfillments.filter((f) => f.kind === 'pickup' && f.status === 'Open').length})
+                  Customer pickup ({fulfillments.filter((f) => f.kind === 'pickup' && f.status === 'Open').length + saleFulfillments.filter(({ f }) => f.kind === 'pickup' && f.status === 'Unfulfilled').length})
                 </button>
                 <button className={`sh-tab ${fulTab === 'delivery' ? 'active' : ''}`} onClick={() => setFulTab('delivery')}>
-                  Delivery ({fulfillments.filter((f) => f.kind === 'delivery' && f.status === 'Open').length})
+                  Delivery ({fulfillments.filter((f) => f.kind === 'delivery' && f.status === 'Open').length + saleFulfillments.filter(({ f }) => f.kind === 'delivery' && f.status === 'Unfulfilled').length})
                 </button>
               </div>
               <div className="subbar-row">
@@ -767,8 +788,29 @@ export function InventoryPage() {
                 <span>Type</span>
                 <span>Customer</span>
               </div>
-              {visibleFulfillments.length ? (
+              {visibleFulfillments.length || visibleSaleFulfillments.length ? (
                 <div className="atable">
+                  {visibleSaleFulfillments.map(({ sale: x, f }) => (
+                    <div key={x.orderNumber} className="ful-row">
+                      <span>
+                        <span className="rlink strong" onClick={() => navigate('/sell/sales-history')}>{x.orderNumber}</span>
+                        <br />
+                        <span className="cnt-meta">{x.lines.reduce((n, l) => n + l.quantity, 0)} item{x.lines.reduce((n, l) => n + l.quantity, 0) === 1 ? '' : 's'} · {new Date(x.at).toLocaleString()} · paid{f.note ? ` · ${f.note}` : ''}</span>
+                      </span>
+                      <span>{outletName}</span>
+                      <span><span className={`tx-badge ${f.status === 'Unfulfilled' ? 'open' : f.status === 'Fulfilled' ? 'received' : 'cancelled'}`}>{f.status}</span></span>
+                      <span>{FULFILLMENT_LABEL[f.kind]}</span>
+                      <span className="ful-cust">
+                        <span>{x.customer || '—'}</span>
+                        {f.status === 'Unfulfilled' && (
+                          <span className="ful-actions">
+                            <button className="btn-s" onClick={() => setFulfillmentStatus(x.orderNumber, 'Fulfilled')}>Fulfill</button>
+                            <span className="rlink" onClick={() => setFulfillmentStatus(x.orderNumber, 'Cancelled')}>Cancel</span>
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  ))}
                   {visibleFulfillments.map((f) => (
                     <div key={f.id} className="ful-row">
                       <span>

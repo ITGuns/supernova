@@ -1,12 +1,16 @@
 import { useState } from 'react';
+import { computeCheckout, useCheckout } from '../lib/checkout';
 import { fmt } from '../lib/format';
-import { CASH, LOYALTY, STORE_CREDIT, isCash, methodOf, tenderShort } from '../lib/tenders';
-import { computeTotals } from '../lib/totals';
+import { verifyPassword } from '../lib/password';
+import { runRules } from '../lib/rules';
+import { CASH, LOYALTY, STORE_CREDIT, giftTender, isCash, isGiftCard, methodOf, tenderShort } from '../lib/tenders';
 import { useCart, type SaleLine, type SaleStatus, type Tender, type TenderMethod } from '../store/cartStore';
 import { useCustomers } from '../store/customerStore';
+import { useGiftCards } from '../store/giftCardStore';
 import { useProducts } from '../store/productStore';
-import { useSettings } from '../store/settingsStore';
+import { useRegister } from '../store/registerStore';
 import { useSetup } from '../store/setupStore';
+import { useUsers } from '../store/userStore';
 
 const uid = (): string => crypto.randomUUID();
 
@@ -25,10 +29,16 @@ export function PayModal({ onClose }: { onClose: () => void }) {
   const openSaleNumber = useCart((s) => s.openSaleNumber);
   const sales = useCart((s) => s.sales);
   const customerName = useCart((s) => s.customerName);
+  const orderNote = useCart((s) => s.orderNote);
+  const setOrderNote = useCart((s) => s.setOrderNote);
   const completeSale = useCart((s) => s.completeSale);
   const payOpenSale = useCart((s) => s.payOpenSale);
-  const taxBps = useSettings((s) => s.defaultTaxRateBps);
   const paymentTypes = useSetup((s) => s.paymentTypes);
+  const training = useRegister((s) => s.trainingMode);
+  const users = useUsers((s) => s.users);
+  const currentUserId = useUsers((s) => s.currentUserId);
+  const findCard = useGiftCards((s) => s.find);
+  const redeemCard = useGiftCards((s) => s.redeem);
   const storeCreditEnabled = useSetup((s) => s.storeCreditEnabled);
   const loyaltyEnabled = useSetup((s) => s.loyaltyEnabled);
   const onAccountEnabled = useSetup((s) => s.onAccountEnabled);
@@ -37,7 +47,9 @@ export function PayModal({ onClose }: { onClose: () => void }) {
   const customers = useCustomers((s) => s.customers);
   const updateCustomer = useCustomers((s) => s.updateCustomer);
 
-  const totals = computeTotals(lines, { bps: discountBps, amountMinor: discountMinor }, 'USD', taxBps, { removeTax: taxRemoved });
+  const totals = useCheckout();
+  void discountBps;
+  void discountMinor;
   const openSale = openSaleNumber ? sales.find((s) => s.orderNumber === openSaleNumber) : undefined;
   const paidSoFar = openSale?.paidMinor ?? 0;
   const totalMinor = Math.max(0, totals.totalMinor - paidSoFar);
@@ -48,6 +60,12 @@ export function PayModal({ onClose }: { onClose: () => void }) {
   const [askRef, setAskRef] = useState<{ method: TenderMethod; amount: number; name: string } | null>(null);
   const [refText, setRefText] = useState('');
   const [emailReceipt, setEmailReceipt] = useState(!!customer?.email);
+  const [giftOpen, setGiftOpen] = useState(false);
+  const [giftNumber, setGiftNumber] = useState('');
+  const [giftMsg, setGiftMsg] = useState('');
+  const [approval, setApproval] = useState<{ rules: string[]; status: SaleStatus } | null>(null);
+  const [approvalPw, setApprovalPw] = useState('');
+  const [approvalErr, setApprovalErr] = useState('');
 
   const tendered = tenders.reduce((s, t) => s + t.amountMinor, 0);
   const remaining = Math.max(0, totalMinor - tendered);
@@ -101,13 +119,59 @@ export function PayModal({ onClose }: { onClose: () => void }) {
       ...(l.discountPct ? { discountPct: l.discountPct } : {}),
       ...(l.note ? { note: l.note } : {}),
       ...(l.soldBy ? { soldBy: l.soldBy } : {}),
+      ...(l.serial ? { serial: l.serial } : {}),
+      ...(l.giftCard ? { giftCard: l.giftCard } : {}),
     }));
+
+  const applyGiftCard = () => {
+    const card = findCard(giftNumber);
+    if (!card) return setGiftMsg('No gift card with that number.');
+    if (card.status !== 'Active' || card.balanceMinor <= 0) return setGiftMsg('That gift card has no balance left.');
+    if (card.expiresAt && card.expiresAt < Date.now()) return setGiftMsg('That gift card has expired.');
+    const alreadyUsed = tenders.filter((t) => t.method === giftTender(card.number)).reduce((a, t) => a + t.amountMinor, 0);
+    const available = card.balanceMinor - alreadyUsed;
+    if (available <= 0) return setGiftMsg('That gift card is already used up on this sale.');
+    const amount = Math.min(amountFor(), available);
+    addTender(giftTender(card.number), amount);
+    setGiftOpen(false);
+    setGiftNumber('');
+    setGiftMsg('');
+  };
+
+  // Business rules run before the sale closes: a manager may need to approve, notes get added, messages shown after.
+  const startFinish = (status: SaleStatus) => {
+    if (status !== 'Completed') return finish(status);
+    const user = users.find((u) => u.id === currentUserId)?.name ?? '';
+    const outcome = runRules('Sale completed', { totalMinor: totals.totalMinor, items: totals.itemCount, discountMinor: totals.discountMinor, customerName, user });
+    if (outcome.notes.length) setOrderNote([orderNote, ...outcome.notes].filter(Boolean).join(' · '));
+    useCart.setState({ lastSaleNotices: outcome.messages });
+    if (outcome.approvals.length) {
+      setApproval({ rules: outcome.approvals.map((r) => r.name), status });
+      setApprovalPw('');
+      setApprovalErr('');
+      return;
+    }
+    finish(status);
+  };
+
+  const approve = async () => {
+    const managers = users.filter((u) => u.enabled && /admin|manager|owner/i.test(u.role));
+    for (const m of managers) {
+      if (await verifyPassword(approvalPw, m.password)) {
+        setApproval(null);
+        finish(approval?.status ?? 'Completed');
+        return;
+      }
+    }
+    setApprovalErr('That isn’t a manager or admin password.');
+  };
 
   const finish = (status: SaleStatus) => {
     settleBalances();
+    if (!training) for (const t of tenders) if (isGiftCard(t.method)) redeemCard(t.method.slice(5), t.amountMinor);
     if (openSale) {
       const added = lines.filter((l) => !l.locked);
-      const addedTotal = added.length ? computeTotals(added, 0, 'USD', taxBps, { removeTax: taxRemoved }).totalMinor : 0;
+      const addedTotal = added.length ? computeCheckout(added, { orderDiscountBps: 0, orderDiscountMinor: 0, taxRemoved, customerName, promoCode: '' }).totalMinor : 0;
       payOpenSale(openSale.orderNumber, tenders, change, toSaleLines((l) => !l.locked), addedTotal, status === 'Completed' ? openSale.status ?? 'Layaway' : status);
       // On account: the customer's balance grows by what's still owed.
       if (customer && status === 'On account') updateCustomer(customer.id, { accountMinor: customer.accountMinor + Math.max(0, remaining) });
@@ -159,14 +223,23 @@ export function PayModal({ onClose }: { onClose: () => void }) {
               </div>
               {totals.discountMinor > 0 && (
                 <div className="dtrow disc">
-                  <span>Discount</span>
+                  <span>Discount{totals.promotions.length ? ` · ${totals.promotions.map((p) => p.name).join(', ')}` : ''}</span>
                   <span>−{fmt(totals.discountMinor)}</span>
                 </div>
               )}
-              <div className="dtrow">
-                <span>Tax</span>
-                <span>{taxRemoved ? 'Removed' : fmt(totals.taxMinor)}</span>
-              </div>
+              {taxRemoved || totals.taxRows.length <= 1 ? (
+                <div className="dtrow">
+                  <span>Tax{totals.taxInclusive && !taxRemoved ? ' (included)' : ''}</span>
+                  <span>{taxRemoved ? 'Removed' : fmt(totals.taxMinor)}</span>
+                </div>
+              ) : (
+                totals.taxRows.map((r) => (
+                  <div key={r.id} className="dtrow">
+                    <span>{r.name} {(r.rateBps / 100).toFixed(2).replace(/\.?0+$/, '')}%</span>
+                    <span>{fmt(r.amountMinor)}</span>
+                  </div>
+                ))
+              )}
               {openSale && (
                 <div className="dtrow">
                   <span>Paid so far</span>
@@ -194,7 +267,28 @@ export function PayModal({ onClose }: { onClose: () => void }) {
               </div>
             </div>
 
-            {askRef ? (
+            {approval ? (
+              <div className="pm-ref">
+                <div className="pm-cash-head">Manager approval needed</div>
+                <p className="reg-open-text">{approval.rules.join(' · ')}. Ask a manager or admin to enter their password.</p>
+                <input className="pm-ref-in" type="password" value={approvalPw} autoFocus onChange={(e) => { setApprovalPw(e.target.value); setApprovalErr(''); }} onKeyDown={(e) => e.key === 'Enter' && approve()} placeholder="Manager password" />
+                {approvalErr && <div className="pe-error" role="alert">{approvalErr}</div>}
+                <div className="pm-quick">
+                  <button onClick={() => setApproval(null)}>Cancel</button>
+                  <button className="pm-primary" onClick={approve}>Approve and complete</button>
+                </div>
+              </div>
+            ) : giftOpen ? (
+              <div className="pm-ref">
+                <div className="pm-cash-head">Gift card</div>
+                <input className="pm-ref-in" value={giftNumber} autoFocus onChange={(e) => { setGiftNumber(e.target.value); setGiftMsg(''); }} onKeyDown={(e) => e.key === 'Enter' && applyGiftCard()} placeholder="Scan or type the card number" />
+                {giftMsg && <div className="pe-error" role="alert">{giftMsg}</div>}
+                <div className="pm-quick">
+                  <button onClick={() => { setGiftOpen(false); setGiftMsg(''); }}>Cancel</button>
+                  <button className="pm-primary" onClick={applyGiftCard}>Apply gift card</button>
+                </div>
+              </div>
+            ) : askRef ? (
               <div className="pm-ref">
                 <div className="pm-cash-head">{askRef.name} reference number</div>
                 <input className="pm-ref-in" value={refText} autoFocus onChange={(e) => setRefText(e.target.value)} placeholder="e.g. check number" />
@@ -217,6 +311,9 @@ export function PayModal({ onClose }: { onClose: () => void }) {
                     {t.name} <span className="pm-primary-amt">{fmt(amountFor())}</span>
                   </button>
                 ))}
+                <button className="pm-primary pm-alt" disabled={remaining === 0} onClick={() => { setGiftOpen(true); setGiftMsg(''); }}>
+                  Gift card <span className="pm-primary-amt">{fmt(amountFor())}</span>
+                </button>
                 {storeCreditEnabled && customer && (
                   <button className="pm-primary pm-alt" disabled={remaining === 0 || creditLeft === 0} onClick={() => addTender(STORE_CREDIT, Math.min(amountFor(), creditLeft))}>
                     Store credit <span className="pm-primary-amt">{fmt(Math.min(remaining, creditLeft))} of {fmt(creditLeft)}</span>
@@ -284,7 +381,7 @@ export function PayModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        <button className="pm-complete" disabled={!canComplete} onClick={() => finish('Completed')}>
+        <button className="pm-complete" disabled={!canComplete || !!approval} onClick={() => startFinish('Completed')}>
           {canComplete ? (
             <>
               Complete sale{change > 0 && <span className="pm-change"> · Change {fmt(change)}</span>}

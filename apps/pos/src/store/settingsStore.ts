@@ -60,7 +60,7 @@ export const useSettings = create<SettingsState>()(
       defaultTaxRateBps: 0,
       taxes: TAX_OPTIONS,
       taxGroups: [],
-      taxExclusive: false,
+      taxExclusive: true,
 
       syncFromDb: async () => {
         const [row, groupsProbe, exclProbe] = await Promise.all([dbSettings.get(), dbSettings.hasTaxGroups(), dbSettings.hasTaxExclusive()]);

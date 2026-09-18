@@ -5,6 +5,8 @@ import { useSetup } from '../store/setupStore';
 import { useCart } from '../store/cartStore';
 import { useCustomers } from '../store/customerStore';
 import { useSettings } from '../store/settingsStore';
+import { useWorkflows } from '../store/workflowStore';
+import { FULFILLMENT_LABEL } from '../store/fulfillmentStore';
 
 const fmtWhen = (t: number) =>
   new Date(t).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -15,6 +17,8 @@ export function Receipt() {
   const storeName = useSettings((s) => s.storeName);
   const paymentTypes = useSetup((s) => s.paymentTypes);
   const customers = useCustomers((s) => s.customers);
+  const notices = useCart((s) => s.lastSaleNotices);
+  const pickupInstructions = useWorkflows((s) => s.fulfillment.pickupInstructions);
   const [emailTo, setEmailTo] = useState<string | null>(null);
   const [emailed, setEmailed] = useState('');
   const [gift, setGift] = useState(false);
@@ -47,6 +51,17 @@ export function Receipt() {
         </div>
         {sale.emailReceipt && customerEmail && !emailed && <div className="rcpt-email">Receipt emailed to {customerEmail}</div>}
         {emailed && <div className="rcpt-email">Receipt emailed to {emailed}</div>}
+        {notices.length > 0 && (
+          <div className="rcpt-notice" role="status">
+            {notices.map((n) => <div key={n}>⚑ {n}</div>)}
+          </div>
+        )}
+        {sale.fulfillment && (
+          <div className="rcpt-email">
+            {FULFILLMENT_LABEL[sale.fulfillment.kind]} · {sale.fulfillment.status}{sale.fulfillment.note ? ` · ${sale.fulfillment.note}` : ''}
+            {sale.fulfillment.kind === 'pickup' && pickupInstructions ? ` · ${pickupInstructions}` : ''}
+          </div>
+        )}
         <div className="rcpt-rows">
           <div className="dtrow pm-total">
             <span>Total</span>
@@ -83,6 +98,21 @@ export function Receipt() {
             onSubmit={(e) => {
               e.preventDefault();
               if (emailTo.trim()) {
+                // Hand the receipt to the device's mail app, addressed to the customer.
+                const body = [
+                  `${storeName} — Receipt ${sale.orderNumber}`,
+                  fmtWhen(sale.at),
+                  '',
+                  ...sale.lines.map((l) => `${l.quantity} x ${l.name}${l.serial ? ` (serial ${l.serial})` : ''}  ${fmt(l.unitPriceMinor * l.quantity)}`),
+                  '',
+                  `Subtotal ${fmt(subtotal)}`,
+                  adjustment !== 0 ? `${adjustment < 0 ? 'Discount' : 'Tax'} ${fmt(Math.abs(adjustment))}` : '',
+                  `TOTAL ${fmt(sale.totalMinor)}`,
+                  ...sale.tenders.map((t) => `${tenderShort(t.method, paymentTypes)} ${fmt(t.amountMinor)}`),
+                  '',
+                  'Thank you for shopping with us!',
+                ].filter((x) => x !== '').join('\n');
+                window.location.href = `mailto:${encodeURIComponent(emailTo.trim())}?subject=${encodeURIComponent(`Receipt ${sale.orderNumber} from ${storeName}`)}&body=${encodeURIComponent(body)}`;
                 setEmailed(emailTo.trim());
                 setEmailTo(null);
               }
@@ -124,7 +154,7 @@ export function Receipt() {
         <div className="rcpt-print-lines">
           {sale.lines.map((l, i) => (
             <div key={i}>
-              <span>{l.quantity}× {l.name}{l.note ? ` — ${l.note}` : ''}</span>
+              <span>{l.quantity}× {l.name}{l.serial ? ` · SN ${l.serial}` : ''}{l.note ? ` — ${l.note}` : ''}</span>
               <span>{gift ? '' : fmt(l.unitPriceMinor * l.quantity)}</span>
             </div>
           ))}
@@ -147,6 +177,7 @@ export function Receipt() {
         </div>
         )}
         {sale.note && <div className="rcpt-print-note">Note: {sale.note}</div>}
+        {sale.fulfillment && <div className="rcpt-print-note">{FULFILLMENT_LABEL[sale.fulfillment.kind]}{sale.fulfillment.note ? `: ${sale.fulfillment.note}` : ''}{sale.fulfillment.kind === 'pickup' && pickupInstructions ? ` — ${pickupInstructions}` : ''}</div>}
         {sale.training && <div className="rcpt-print-training">TRAINING MODE — NOT A SALE</div>}
         <div className="rcpt-print-foot">Thank you for shopping with us!</div>
       </div>

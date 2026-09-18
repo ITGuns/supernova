@@ -18,9 +18,10 @@ export interface UserDetails {
   pin: string;
   barcode: string;
   picture: string;
+  customFields: Record<string, string>;
 }
 
-export const EMPTY_USER_DETAILS: UserDetails = { username: '', outlets: [], pin: '', barcode: '', picture: '' };
+export const EMPTY_USER_DETAILS: UserDetails = { username: '', outlets: [], pin: '', barcode: '', picture: '', customFields: {} };
 
 export interface AppUser {
   id: string;

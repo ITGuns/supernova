@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { computeTotals } from '../lib/totals';
 import { useCart } from '../store/cartStore';
-import { FULFILLMENT_LABEL, useFulfillments, type FulfillmentKind } from '../store/fulfillmentStore';
+import { FULFILLMENT_LABEL, type FulfillmentKind } from '../store/fulfillmentStore';
 import { useQuotes } from '../store/quotesStore';
 import { useRegisterSession } from '../store/registerSessionStore';
 import { useRegister } from '../store/registerStore';
@@ -10,6 +10,9 @@ import { useSettings } from '../store/settingsStore';
 import { useUsers } from '../store/userStore';
 import { useCustomers } from '../store/customerStore';
 import { MoneyInput } from '../admin/NumInput';
+import { useWorkflows } from '../store/workflowStore';
+import { newGiftCardNumber, useGiftCards } from '../store/giftCardStore';
+import { runRules } from '../lib/rules';
 import { ParkedTray } from './ParkedTray';
 import { PayModal } from './PayModal';
 import { QuickKeys } from './QuickKeys';
@@ -32,7 +35,6 @@ export function RegisterScreen() {
   const discountBps = useCart((s) => s.orderDiscountBps);
   const addCustomLine = useCart((s) => s.addCustomLine);
   const addQuote = useQuotes((s) => s.addQuote);
-  const addFulfillment = useFulfillments((s) => s.addFulfillment);
   const taxBps = useSettings((s) => s.defaultTaxRateBps);
   const empty = lines.length === 0;
   const [serviceOpen, setServiceOpen] = useState(false);
@@ -41,6 +43,11 @@ export function RegisterScreen() {
   const [quoteOpen, setQuoteOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
   const assignAllLines = useCart((s) => s.assignAllLines);
+  const setFulfillment = useCart((s) => s.setFulfillment);
+  const setCustomer = useCart((s) => s.setCustomer);
+  const addGiftCardLine = useCart((s) => s.addGiftCardLine);
+  const fulfillmentSettings = useWorkflows((s) => s.fulfillment);
+  const [giftOpen, setGiftOpen] = useState(false);
   const openSaleNumber = useCart((s) => s.openSaleNumber);
   const users = useUsers((s) => s.users);
   const customers = useCustomers((s) => s.customers);
@@ -115,6 +122,7 @@ export function RegisterScreen() {
                 <button onClick={() => { setMoreOpen(false); nav('/services/new', { state: { customerName, lines } }); }}>Create service</button>
                 <button onClick={() => { setFulfilOpen(true); setMoreOpen(false); }} disabled={empty || !!openSaleNumber}>Mark as unfulfilled</button>
                 <button onClick={() => { setAssignOpen(true); setMoreOpen(false); }} disabled={empty}>Assign all sale items</button>
+                <button onClick={() => { setGiftOpen(true); setMoreOpen(false); }} disabled={!!openSaleNumber}>Sell gift card</button>
                 <button onClick={() => { clear(); setMoreOpen(false); }} disabled={empty}>
                   {openSaleNumber ? 'Dismiss sale' : 'Discard sale'}
                 </button>
@@ -133,7 +141,7 @@ export function RegisterScreen() {
           placeholder="Note (optional)"
           confirm="Park sale"
           onClose={() => setParkOpen(false)}
-          onConfirm={(note) => { park(note); setParkOpen(false); }}
+          onConfirm={(note) => { runRules('Sale parked', { customerName, items: lines.reduce((a, l) => a + l.quantity, 0) }); park(note); setParkOpen(false); }}
         />
       )}
       {quoteOpen && (
@@ -165,16 +173,17 @@ export function RegisterScreen() {
           </div>
         </div>
       )}
+      {giftOpen && <GiftCardSaleModal onClose={() => setGiftOpen(false)} onAdd={(number, amount) => { addGiftCardLine(number, amount); setGiftOpen(false); }} />}
       {serviceOpen && <ServiceSaleModal onAdd={(name, priceMinor) => { addCustomLine({ name, priceMinor }); setServiceOpen(false); }} onClose={() => setServiceOpen(false)} />}
       {fulfilOpen && (
         <FulfillmentModal
           customerName={customerName}
           onClose={() => setFulfilOpen(false)}
           onSave={(kind, customer, note) => {
-            addFulfillment({ kind, customerName: customer, lines, discountBps, note: note || orderNote });
-            clear();
+            setCustomer(customer);
+            setFulfillment({ kind, note });
+            if (kind === 'delivery' && fulfillmentSettings.deliveryFeeMinor > 0 && !lines.some((l) => l.name === 'Delivery fee')) addCustomLine({ name: 'Delivery fee', priceMinor: fulfillmentSettings.deliveryFeeMinor });
             setFulfilOpen(false);
-            nav('/inventory', { state: { tab: 'fulfillments' } });
           }}
         />
       )}
@@ -276,7 +285,9 @@ function ServiceSaleModal({ onAdd, onClose }: { onAdd: (name: string, priceMinor
 
 /** Park the sale as an order to pack, pick up or deliver; it's paid when retrieved. */
 function FulfillmentModal({ customerName, onSave, onClose }: { customerName: string; onSave: (kind: FulfillmentKind, customer: string, note: string) => void; onClose: () => void }) {
-  const [kind, setKind] = useState<FulfillmentKind>('pickup');
+  const settings = useWorkflows((s) => s.fulfillment);
+  const kinds = (Object.keys(FULFILLMENT_LABEL) as FulfillmentKind[]).filter((k) => (k === 'pickup' ? settings.pickupEnabled : k === 'delivery' ? settings.deliveryEnabled : true));
+  const [kind, setKind] = useState<FulfillmentKind>(kinds.includes('pickup') ? 'pickup' : kinds[0] ?? 'pack');
   const [customer, setCustomer] = useState(customerName);
   const [note, setNote] = useState('');
   const ok = customer.trim().length > 0;
@@ -294,13 +305,14 @@ function FulfillmentModal({ customerName, onSave, onClose }: { customerName: str
             if (ok) onSave(kind, customer.trim(), note.trim());
           }}
         >
-          <p className="reg-open-text">The sale is saved under Inventory → Fulfillments to be packed, picked up or delivered, and paid for when it’s retrieved.</p>
+          <p className="reg-open-text">Choose how the customer receives the order, then take payment. The sale shows under Inventory → Fulfillments until it’s fulfilled.{settings.deliveryEnabled && settings.deliveryFeeMinor > 0 ? ` Delivery adds a $${(settings.deliveryFeeMinor / 100).toFixed(2)} fee.` : ''}</p>
           <label className="reg-open-field">
             <span>Fulfillment type</span>
             <select value={kind} onChange={(e) => setKind(e.target.value as FulfillmentKind)}>
-              {(Object.keys(FULFILLMENT_LABEL) as FulfillmentKind[]).map((k) => <option key={k} value={k}>{FULFILLMENT_LABEL[k]}</option>)}
+              {kinds.map((k) => <option key={k} value={k}>{FULFILLMENT_LABEL[k]}</option>)}
             </select>
           </label>
+          {kind === 'pickup' && settings.pickupInstructions && <p className="reg-open-text">{settings.pickupInstructions}</p>}
           <label className="reg-open-field">
             <span>Customer</span>
             <input value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Customer name" autoFocus={!customerName} />
@@ -309,7 +321,7 @@ function FulfillmentModal({ customerName, onSave, onClose }: { customerName: str
             <span>Note (optional)</span>
             <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Collect Saturday" />
           </label>
-          <button className="pm-complete" type="submit" disabled={!ok}>Save as unfulfilled</button>
+          <button className="pm-complete" type="submit" disabled={!ok}>Mark as unfulfilled</button>
         </form>
       </div>
     </div>
@@ -346,6 +358,50 @@ function NoteModal({ title, text, placeholder, confirm, emailTo, onConfirm, onCl
             <input value={note} autoFocus onChange={(e) => setNote(e.target.value)} placeholder={placeholder} />
           </label>
           <button className="pm-complete" type="submit">{confirm}</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/** Sell a gift card: the card is activated for the amount when the sale is paid. */
+function GiftCardSaleModal({ onAdd, onClose }: { onAdd: (number: string, amountMinor: number) => void; onClose: () => void }) {
+  const cards = useGiftCards((s) => s.cards);
+  const [number, setNumber] = useState('');
+  const [amount, setAmount] = useState(2500);
+  const [error, setError] = useState('');
+  const submit = () => {
+    const num = number.replace(/[\s-]/g, '').toUpperCase();
+    if (!num) return setError('Scan the card or generate a number.');
+    if (amount <= 0) return setError('Enter the amount to load onto the card.');
+    const existing = cards.find((c) => c.number === num);
+    if (existing && existing.status === 'Cancelled') return setError('That card was cancelled.');
+    onAdd(num, amount);
+  };
+  return (
+    <div className="pm-overlay" onClick={onClose}>
+      <div className="pm reg-open" onClick={(e) => e.stopPropagation()} role="dialog">
+        <div className="pm-head">
+          <h2>Sell gift card</h2>
+          <button className="pm-close" onClick={onClose} aria-label="Close">×</button>
+        </div>
+        <form className="reg-open-body" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+          {error && <div className="pe-error" role="alert">{error}</div>}
+          <label className="reg-open-field">
+            <span>Card number <span className="pe-hint">Scan a physical card, or generate one for a printed voucher</span></span>
+            <span className="pe-inline">
+              <input value={number} autoFocus onChange={(e) => { setNumber(e.target.value); setError(''); }} placeholder="Scan or type" />
+              <button type="button" className="btn-s" onClick={() => setNumber(newGiftCardNumber(cards))}>Generate</button>
+            </span>
+          </label>
+          <label className="reg-open-field">
+            <span>Amount</span>
+            <span className="pe-inline">
+              <MoneyInput className="" minor={amount} onChange={(v) => { setAmount(v); setError(''); }} />
+              {[2500, 5000, 10000].map((v) => <button key={v} type="button" className="btn-s" onClick={() => setAmount(v)}>${v / 100}</button>)}
+            </span>
+          </label>
+          <button className="pm-complete" type="submit">Add gift card to sale</button>
         </form>
       </div>
     </div>

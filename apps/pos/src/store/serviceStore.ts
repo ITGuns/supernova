@@ -57,7 +57,11 @@ export interface Service {
   saleOrderNumber: string;
   createdAt: number;
   completedAt: number | null;
+  customFields?: Record<string, string>;
 }
+
+// Whether services has custom_fields (migration 0011).
+let hasCustomFields = true;
 
 export const isCurrentService = (s: Service): boolean => s.status !== 'Completed' && s.status !== 'Cancelled';
 
@@ -80,6 +84,7 @@ const toRow = (s: Service): Record<string, unknown> => ({
   sale_order_number: s.saleOrderNumber || null,
   created_at: new Date(s.createdAt).toISOString(),
   completed_at: s.completedAt ? new Date(s.completedAt).toISOString() : null,
+  ...(hasCustomFields ? { custom_fields: s.customFields ?? {} } : {}),
 });
 
 const fromRow = (r: Record<string, unknown>): Service => ({
@@ -98,6 +103,7 @@ const fromRow = (r: Record<string, unknown>): Service => ({
   saleOrderNumber: (r.sale_order_number as string | null) ?? '',
   createdAt: r.created_at ? new Date(r.created_at as string).getTime() : Date.now(),
   completedAt: r.completed_at ? new Date(r.completed_at as string).getTime() : null,
+  customFields: (r.custom_fields as Record<string, string> | null) ?? {},
 });
 
 const statusToRow = (s: ServiceStatus): Record<string, unknown> => ({ id: s.id, name: s.name, position: s.position, system: s.system });
@@ -125,7 +131,8 @@ export const useServices = create<ServiceState>()(
       statuses: DEFAULT_STATUSES,
       nextSeq: 1001,
       syncFromDb: async () => {
-        const [rows, statusRows] = await Promise.all([dbServices.list(), dbServiceStatuses.list()]);
+        const [rows, statusRows, cfProbe] = await Promise.all([dbServices.list(), dbServiceStatuses.list(), dbServices.hasCustomFields()]);
+        if (cfProbe !== null) hasCustomFields = cfProbe;
         if (rows !== null && rows !== 'missing') {
           const services = rows.map(fromRow);
           const maxSeq = services.reduce((m, s) => Math.max(m, parseInt(s.number.replace(/\D/g, ''), 10) || 0), 1000);

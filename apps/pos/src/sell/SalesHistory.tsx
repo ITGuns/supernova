@@ -2,7 +2,12 @@ import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { fmt } from '../lib/format';
 import { isCash, methodOf, tenderLabel as tenderName } from '../lib/tenders';
-import { refundFor, saleBalance, useCart, type Tender } from '../store/cartStore';
+import { refundAmountFor, refundFor, returnedQty, saleBalance, useCart, type CompletedSale, type SaleFulfillment, type Tender } from '../store/cartStore';
+import { IntInput } from '../admin/NumInput';
+import { CASH, STORE_CREDIT, isGiftCard } from '../lib/tenders';
+import { FULFILLMENT_LABEL } from '../store/fulfillmentStore';
+import { useCustomers } from '../store/customerStore';
+import { useSettings } from '../store/settingsStore';
 import { useSetup } from '../store/setupStore';
 import { useUsers } from '../store/userStore';
 import { BagClock } from '../admin/illustrations';
@@ -24,10 +29,12 @@ interface HSale {
   training: boolean;
   methods: string[];
   tenders: Tender[];
-  lines: { name: string; qty: number; priceMinor: number; note?: string }[];
+  lines: { name: string; qty: number; priceMinor: number; note?: string; returned: number; serial?: string }[];
   /** What a return would (or did) hand back, per tender method. */
   refund: Tender[];
   refundedAt?: number;
+  fulfillment?: SaleFulfillment;
+  sale: CompletedSale;
 }
 
 type DatePreset = 'Today' | 'Yesterday' | 'Last 7 days' | 'This month' | 'Last month' | 'All time' | 'Custom';
@@ -48,6 +55,16 @@ export function SalesHistory() {
   const markReturned = useCart((s) => s.markReturned);
   const voidSale = useCart((s) => s.voidSale);
   const continueSale = useCart((s) => s.continueSale);
+  const returnItems = useCart((s) => s.returnItems);
+  const updateTenders = useCart((s) => s.updateTenders);
+  const setFulfillmentStatus = useCart((s) => s.setFulfillmentStatus);
+  const customersList = useCustomers((s) => s.customers);
+  const updateCustomer = useCustomers((s) => s.updateCustomer);
+  const storeName = useSettings((s) => s.storeName);
+  const [returnQty, setReturnQty] = useState<Record<number, number>>({});
+  const [refundMethod, setRefundMethod] = useState('original');
+  const [editPay, setEditPay] = useState<HSale | null>(null);
+  const [editTenders, setEditTenders] = useState<Tender[]>([]);
   const paymentTypes = useSetup((s) => s.paymentTypes);
   const tenderLabel = (m: string) => tenderName(m, paymentTypes);
   const users = useUsers((s) => s.users);
@@ -104,7 +121,9 @@ export function SalesHistory() {
     training: !!s.training,
     methods: s.tenders.map((t) => t.method),
     tenders: s.tenders,
-    lines: s.lines.map((l) => ({ name: l.name, qty: l.quantity, priceMinor: l.unitPriceMinor, note: l.note })),
+    lines: s.lines.map((l, i) => ({ name: l.name, qty: l.quantity, priceMinor: l.unitPriceMinor, note: l.note, returned: returnedQty(s, i), serial: l.serial })),
+    fulfillment: s.fulfillment,
+    sale: s,
     refund: s.status === 'Returned' ? (s.refundTenders ?? []) : refundFor(s),
     refundedAt: s.refundedAt,
   }));
@@ -138,7 +157,7 @@ export function SalesHistory() {
   // Process return: paid sales only. Continue sale: open layaway / on-account sales (parked sales are listed separately below).
   const visible =
     tab === 'Process return'
-      ? filtered.filter((s) => s.status === 'Completed' && !s.training)
+      ? filtered.filter((s) => (s.status === 'Completed' || s.status === 'Partially returned') && !s.training)
       : tab === 'Continue sale'
       ? allSales.filter((s) => s.status === 'Layaway' || s.status === 'On account')
       : filtered;
@@ -159,11 +178,36 @@ export function SalesHistory() {
   };
 
   const doReturn = (s: HSale) => {
-    if (s.status !== 'Returned') setConfirmReturn(s);
+    if (s.status === 'Returned' || s.status === 'Voided') return;
+    const q: Record<number, number> = {};
+    s.lines.forEach((l, i) => { q[i] = l.qty - l.returned; });
+    setReturnQty(q);
+    setRefundMethod('original');
+    setConfirmReturn(s);
   };
+  const returnSelection = confirmReturn ? confirmReturn.lines.map((_, i) => ({ index: i, quantity: returnQty[i] ?? 0 })).filter((it) => it.quantity > 0) : [];
+  const returnAmount = confirmReturn ? refundAmountFor(confirmReturn.sale, returnSelection) : 0;
+  const returnTenders: Tender[] = confirmReturn
+    ? refundMethod === 'original'
+      ? refundFor(confirmReturn.sale, returnAmount)
+      : [{ id: `r-${Date.now()}`, method: refundMethod, amountMinor: returnAmount }]
+    : [];
   const commitReturn = () => {
-    if (confirmReturn) markReturned(confirmReturn.orderNumber);
+    if (!confirmReturn || !returnSelection.length) return;
+    returnItems(confirmReturn.orderNumber, returnSelection, returnTenders);
+    // A refund to store credit lands on the customer's account.
+    if (refundMethod === STORE_CREDIT && confirmReturn.customer) {
+      const c = customersList.find((x) => `${x.firstName} ${x.lastName}`.trim() === confirmReturn.customer);
+      if (c) updateCustomer(c.id, { storeCreditMinor: c.storeCreditMinor + returnAmount });
+    }
     setConfirmReturn(null);
+  };
+  void markReturned;
+  const emailReceipt = (s: HSale) => {
+    const to = customersList.find((x) => `${x.firstName} ${x.lastName}`.trim() === s.customer)?.email ?? '';
+    const body = [`${storeName} — Receipt ${s.receipt}`, new Date(s.at).toLocaleString(), '', ...s.lines.map((l) => `${l.qty} x ${l.name}  ${fmt(l.priceMinor * l.qty)}`), '', `TOTAL ${fmt(s.totalMinor)}`, ...s.tenders.map((t) => `${tenderLabel(t.method)} ${fmt(t.amountMinor)}`), '', 'Thank you for shopping with us!'].join('\n');
+    window.location.href = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(`Receipt ${s.receipt} from ${storeName}`)}&body=${encodeURIComponent(body)}`;
+    setNotice(`Receipt ${s.receipt} opened in your mail app${to ? ` for ${to}` : ''}.`);
   };
 
   const printReceipt = (s: HSale) => {
@@ -285,7 +329,7 @@ export function SalesHistory() {
                 <div className="shf"><label>Sale total</label><input className="sh-input" placeholder="$ Enter sale total" value={totalFilter} onChange={(e) => setTotalFilter(e.target.value)} /></div>
                 <div className="shf"><label>Outlet</label><select className="sh-input"><option>{outletName}</option></select></div>
                 <div className="shf"><label>Register</label><select className="sh-input"><option>{outlet?.registers[0] ?? 'Main Register'}</option></select></div>
-                <div className="shf"><label>Status</label><select className="sh-input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="All">All sales</option><option>Completed</option><option>Returned</option><option>Voided</option><option>Layaway</option><option>On account</option><option>Training</option></select></div>
+                <div className="shf"><label>Status</label><select className="sh-input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="All">All sales</option><option>Completed</option><option>Returned</option><option>Partially returned</option><option>Voided</option><option>Layaway</option><option>On account</option><option>Training</option></select></div>
                 <div className="shf"><label>User</label><select className="sh-input" value={userFilter} onChange={(e) => setUserFilter(e.target.value)}><option value="All">All users</option>{users.map((u) => <option key={u.id}>{u.name}</option>)}</select></div>
                 <div className="shf"><label>Payment type</label><select className="sh-input" value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}><option value="All">All payment types</option>{paymentTypes.map((t) => <option key={t.id} value={methodOf(t)}>{t.name}</option>)}</select></div>
               </>
@@ -328,10 +372,10 @@ export function SalesHistory() {
                       <span className="sh-soldby"><span className="cust-av sh-av">{initials(s.soldBy)}</span><span>{s.soldBy}<br /><span className="sh-time">{s.outlet}</span></span></span>
                       <span>{s.note || '-'}</span>
                       <span className="r">{fmt(s.totalMinor)}</span>
-                      <span>{s.status}{s.balanceMinor > 0 && ` · ${fmt(s.balanceMinor)} owing`}{s.training && <> <span className="qt-chip draft">Training</span></>}</span>
+                      <span>{s.status}{s.balanceMinor > 0 && ` · ${fmt(s.balanceMinor)} owing`}{s.fulfillment && ` · ${FULFILLMENT_LABEL[s.fulfillment.kind]} ${s.fulfillment.status.toLowerCase()}`}{s.training && <> <span className="qt-chip draft">Training</span></>}</span>
                       {tab === 'Process return' ? (
                         <span><button className="btn-s" onClick={(e) => { e.stopPropagation(); doReturn(s); }}>Return items</button></span>
-                      ) : s.status === 'Completed' && !s.training ? (
+                      ) : (s.status === 'Completed' || s.status === 'Partially returned') && !s.training ? (
                         <span className="sh-return" title="Return items" onClick={(e) => { e.stopPropagation(); doReturn(s); }}>↩</span>
                       ) : (
                         <span />
@@ -361,10 +405,12 @@ export function SalesHistory() {
                           </div>
                         )}
                         <div className="sh-actions">
-                          {s.status === 'Completed' && !s.training && <button className="btn-s" onClick={() => doReturn(s)}>Return items</button>}
+                          {(s.status === 'Completed' || s.status === 'Partially returned') && !s.training && <button className="btn-s" onClick={() => doReturn(s)}>Return items</button>}
                           {(s.status === 'Layaway' || s.status === 'On account') && <button className="btn-p" onClick={() => { continueSale(s.orderNumber); navigate('/sell'); }}>Continue sale</button>}
+                          {s.status !== 'Voided' && <button className="btn-s" onClick={() => { setEditPay(s); setEditTenders(s.tenders.map((t) => ({ ...t }))); }}>Edit payments</button>}
+                          {s.fulfillment?.status === 'Unfulfilled' && <button className="btn-p" onClick={() => setFulfillmentStatus(s.orderNumber, 'Fulfilled')}>Fulfill sale</button>}
                           <button className="btn-s" onClick={() => printReceipt(s)}>Print receipt</button>
-                          <button className="btn-s" onClick={() => setNotice(`Receipt ${s.receipt} emailed${s.customer ? ` to ${s.customer}` : ''}.`)}>Email receipt</button>
+                          <button className="btn-s" onClick={() => emailReceipt(s)}>Email receipt</button>
                           <button className="btn-s" onClick={() => printReceipt({ ...s, lines: s.lines, tenders: [], totalMinor: 0 })}>Gift receipt</button>
                           {s.status !== 'Voided' && s.status !== 'Returned' && <button className="btn-s danger" onClick={() => setConfirmVoid(s)}>Void</button>}
                         </div>
@@ -408,39 +454,81 @@ export function SalesHistory() {
         <div className="pm-overlay" onClick={() => setConfirmReturn(null)}>
           <div className="pm sh-confirm" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="sh-confirm-title">
             <div className="pm-head">
-              <h2 id="sh-confirm-title">Return sale {confirmReturn.receipt}?</h2>
+              <h2 id="sh-confirm-title">Return items from sale {confirmReturn.receipt}</h2>
               <button className="pm-close" onClick={() => setConfirmReturn(null)} aria-label="Close">×</button>
             </div>
             <div className="pm-body sh-confirm-body">
               <div className="pm-receipt">
-                <div className="pm-receipt-title">Items to be restocked</div>
+                <div className="pm-receipt-title">Choose what’s coming back</div>
                 <div className="pm-lines">
                   {confirmReturn.lines.map((l, i) => (
-                    <div key={i} className="pm-line">
-                      <span className="pm-qty">{l.qty}×</span>
-                      <span className="pm-name">{l.name}</span>
-                      <span className="pm-amt">{fmt(l.priceMinor * l.qty)}</span>
+                    <div key={i} className="pm-line sh-ret-line">
+                      <span className="pm-name">{l.name}{l.serial ? ` · SN ${l.serial}` : ''}<br /><span className="pe-muted">{l.qty} sold{l.returned ? ` · ${l.returned} already returned` : ''} · {fmt(l.priceMinor)} each</span></span>
+                      <span className="sh-ret-qty">
+                        <IntInput className="" int={returnQty[i] ?? 0} onChange={(n) => setReturnQty({ ...returnQty, [i]: Math.max(0, Math.min(l.qty - l.returned, n ?? 0)) })} />
+                        <span className="pe-muted">of {l.qty - l.returned}</span>
+                      </span>
                     </div>
                   ))}
                 </div>
                 <div className="pm-totals">
-                  <div className="dtrow pm-total"><span>Sale total</span><span>{fmt(confirmReturn.totalMinor)}</span></div>
-                  {confirmReturn.refund.map((t) => (
+                  <label className="reg-open-field">
+                    <span>Refund to</span>
+                    <select value={refundMethod} onChange={(e) => setRefundMethod(e.target.value)}>
+                      <option value="original">Original payment method{confirmReturn.tenders.length > 1 ? 's' : ''}</option>
+                      <option value={CASH}>Cash</option>
+                      {paymentTypes.filter((t) => methodOf(t) !== CASH).map((t) => <option key={t.id} value={methodOf(t)}>{t.name}</option>)}
+                      {confirmReturn.customer && <option value={STORE_CREDIT}>Store credit ({confirmReturn.customer})</option>}
+                      {confirmReturn.tenders.filter((t) => isGiftCard(t.method)).map((t) => <option key={t.id} value={t.method}>{tenderLabel(t.method)}</option>)}
+                    </select>
+                  </label>
+                  {returnTenders.map((t) => (
                     <div key={t.id} className="dtrow disc">
                       <span>Refund to {tenderLabel(t.method).toLowerCase()}</span>
                       <span>−{fmt(t.amountMinor)}</span>
                     </div>
                   ))}
+                  <div className="dtrow pm-total"><span>Refund total</span><span>{fmt(returnAmount)}</span></div>
                 </div>
                 <p className="sh-confirm-hint">
-                  This marks the sale as returned, puts the items back into stock, refunds {fmt(confirmReturn.totalMinor)} to the original payment method{confirmReturn.refund.length > 1 ? 's' : ''} and removes it from reported revenue.
-                  {confirmReturn.refund.some((t) => isCash(t.method)) && ' Hand the cash refund to the customer from the till.'} It can’t be undone.
+                  Returned items go back into stock and the refund comes off reported revenue. Order discounts and tax are refunded in proportion.
+                  {returnTenders.some((t) => isCash(t.method)) && ' Hand the cash refund to the customer from the till.'} This can’t be undone.
                 </p>
               </div>
             </div>
             <div className="sh-confirm-actions">
               <button className="btn-s" onClick={() => setConfirmReturn(null)}>Cancel</button>
-              <button className="btn-p" onClick={commitReturn}>Confirm return</button>
+              <button className="btn-p" disabled={returnSelection.length === 0} onClick={commitReturn}>Refund {fmt(returnAmount)}</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {editPay && (
+        <div className="pm-overlay" onClick={() => setEditPay(null)}>
+          <div className="pm sh-confirm" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="pm-head">
+              <h2>Edit payments · {editPay.receipt}</h2>
+              <button className="pm-close" onClick={() => setEditPay(null)} aria-label="Close">×</button>
+            </div>
+            <div className="pm-body sh-confirm-body">
+              <div className="pm-receipt">
+                <p className="sh-confirm-hint">Correct which payment type was used (for example a sale rung up as cash that was actually paid by card). Amounts stay the same so the sale still balances.</p>
+                {editTenders.map((t, i) => (
+                  <div key={t.id} className="sh-edit-tender">
+                    <select value={t.method} onChange={(e) => setEditTenders(editTenders.map((x, xi) => (xi === i ? { ...x, method: e.target.value } : x)))}>
+                      <option value={CASH}>Cash</option>
+                      {paymentTypes.filter((pt) => methodOf(pt) !== CASH).map((pt) => <option key={pt.id} value={methodOf(pt)}>{pt.name}</option>)}
+                      {(t.method === STORE_CREDIT || t.method === 'LOYALTY' || isGiftCard(t.method)) && <option value={t.method}>{tenderLabel(t.method)}</option>}
+                    </select>
+                    <input value={t.reference ?? ''} onChange={(e) => setEditTenders(editTenders.map((x, xi) => (xi === i ? { ...x, reference: e.target.value } : x)))} placeholder="Reference (optional)" />
+                    <span className="r">{fmt(t.amountMinor)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="sh-confirm-actions">
+              <button className="btn-s" onClick={() => setEditPay(null)}>Cancel</button>
+              <button className="btn-p" onClick={() => { updateTenders(editPay.orderNumber, editTenders); setEditPay(null); setNotice(`Payments on ${editPay.receipt} updated.`); }}>Save payments</button>
             </div>
           </div>
         </div>

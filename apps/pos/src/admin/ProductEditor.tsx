@@ -16,6 +16,7 @@ import {
   type SkuCodeType,
 } from '../store/productStore';
 import { useInventory } from '../store/inventoryStore';
+import { useCustomFields } from '../store/customFieldStore';
 import { useSettings } from '../store/settingsStore';
 import { useSetup } from '../store/setupStore';
 import { Field, Section } from './FormLayout';
@@ -76,6 +77,7 @@ interface Draft {
   supplierPriceMinor: number;
   priceMinor: number;
   trackInventory: boolean;
+  customFields: Record<string, string>;
   replenishMethod: ReplenishMethod;
   available: number;
   minQty: string;
@@ -107,6 +109,7 @@ const blankDraft = (products: Product[], categoryId: string, brand: string, supp
   supplierPriceMinor: 0,
   priceMinor: 0,
   trackInventory: true,
+  customFields: {},
   replenishMethod: 'minmax',
   available: 0,
   minQty: '',
@@ -138,6 +141,7 @@ const draftFrom = (p: Product): Draft => ({
   supplierPriceMinor: p.supplierPriceMinor ?? 0,
   priceMinor: p.priceMinor,
   trackInventory: p.trackInventory ?? true,
+  customFields: { ...(p.customFields ?? {}) },
   replenishMethod: p.replenishMethod ?? 'minmax',
   available: p.available,
   minQty: p.minQty == null ? '' : String(p.minQty),
@@ -229,6 +233,7 @@ export function ProductEditor() {
   const suppliers = useCatalogMeta((s) => s.suppliers);
   const addEntity = useCatalogMeta((s) => s.addEntity);
   const transactions = useInventory((s) => s.transactions);
+  const productFields = useCustomFields((s) => s.fields).filter((f) => f.application === 'Products');
   const knownTags = useProductTags((s) => s.tags);
   const ensureTags = useProductTags((s) => s.ensureTags);
   const taxes = useSettings((s) => s.taxes);
@@ -237,7 +242,9 @@ export function ProductEditor() {
 
   const existing = id ? products.find((p) => p.id === id) : undefined;
   const isNew = !existing;
-  const defaultTaxId = taxes.find((t) => t.label === defaultTaxLabel)?.id ?? taxes[0]?.id ?? '';
+  // New products follow the outlet's default tax unless a specific rate is chosen.
+  const defaultTaxId = '';
+  const taxGroups = useSettings((st) => st.taxGroups);
 
   const [draft, setDraft] = useState<Draft>(() =>
     existing
@@ -365,6 +372,7 @@ export function ProductEditor() {
     taxId: draft.taxId,
     supplierPriceMinor: draft.supplierPriceMinor,
     trackInventory: draft.trackInventory,
+    customFields: draft.customFields,
     replenishMethod: draft.replenishMethod,
     minQty: intOrNull(draft.minQty),
     maxQty: intOrNull(draft.maxQty),
@@ -735,10 +743,32 @@ export function ProductEditor() {
               <button type="button" className="rlink pe-add" onClick={() => set({ suppliers: [...draft.suppliers, { supplier: '', code: '', priceMinor: 0 }] })}>＋ Add another supplier</button>
             </Section>
 
+            {productFields.length > 0 && (
+              <Section title="Custom fields" hint="Extra details your store captures on products (Setup → Workflows → Custom fields).">
+                <div className="pe-grid2">
+                  {productFields.map((f) => (
+                    <Field key={f.id} label={f.name}>
+                      {f.type === 'Checkbox' ? (
+                        <label className="pe-check"><input type="checkbox" checked={draft.customFields[f.id] === 'yes'} onChange={(e) => set({ customFields: { ...draft.customFields, [f.id]: e.target.checked ? 'yes' : '' } })} /><span>Yes</span></label>
+                      ) : f.type === 'Dropdown' ? (
+                        <select className="pe-input" value={draft.customFields[f.id] ?? ''} onChange={(e) => set({ customFields: { ...draft.customFields, [f.id]: e.target.value } })}>
+                          <option value="">—</option>
+                          {f.options.map((o) => <option key={o}>{o}</option>)}
+                        </select>
+                      ) : (
+                        <input className="pe-input" type={f.type === 'Date' ? 'date' : f.type === 'Number' ? 'number' : 'text'} value={draft.customFields[f.id] ?? ''} onChange={(e) => set({ customFields: { ...draft.customFields, [f.id]: e.target.value } })} />
+                      )}
+                    </Field>
+                  ))}
+                </div>
+              </Section>
+            )}
             <Section title="Tax">
               <Field label="Tax">
                 <select className="pe-input" value={draft.taxId} onChange={(e) => set({ taxId: e.target.value })}>
-                  {taxes.map((t) => <option key={t.id} value={t.id}>{t.label}{t.label === defaultTaxLabel ? ' — default' : ''}</option>)}
+                  <option value="">Default outlet tax ({defaultTaxLabel})</option>
+                  {taxes.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                  {taxGroups.map((g) => <option key={g.id} value={g.id}>{g.name} (group)</option>)}
                 </select>
               </Field>
             </Section>
