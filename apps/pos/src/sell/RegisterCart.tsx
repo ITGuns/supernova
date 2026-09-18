@@ -137,7 +137,7 @@ export function RegisterCart({ onPay }: { onPay: () => void }) {
       )}
 
       <div className="dcart-lines">
-        {empty && <div className="dcart-empty">Add products to start a sale</div>}
+        {empty && <div className="dcart-empty" aria-hidden="true" />}
         {lines.map((l) => {
           const lineTotal = Math.round(l.unitPriceMinor * l.quantity * (1 - (l.discountPct ?? 0) / 100));
           const open = expanded === l.lineId;
@@ -200,7 +200,7 @@ export function RegisterCart({ onPay }: { onPay: () => void }) {
         })}
       </div>
 
-      {!empty && (
+      {(!empty || true) && (
         <div className="dcart-totals">
           <div className="dtrow">
             <span>Subtotal</span>

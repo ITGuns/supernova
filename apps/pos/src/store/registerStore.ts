@@ -73,7 +73,7 @@ const uid = (): string =>
     ? crypto.randomUUID()
     : `id-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
 
-const DEFAULT_LAYOUTS: QuickKeyLayout[] = [{ id: 'default', name: 'Default layout', keys: [], keepFolderOpen: false }];
+const DEFAULT_LAYOUTS: QuickKeyLayout[] = [{ id: 'default', name: 'Default Quick Keys', keys: [], keepFolderOpen: false }];
 
 // Set while applying cloud state so the save subscriber doesn't echo it back.
 let hydrating = false;

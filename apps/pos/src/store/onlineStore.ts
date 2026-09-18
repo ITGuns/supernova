@@ -9,7 +9,9 @@ interface OnlineState {
   /** AI Showroom: a generated, shareable showcase page for your catalog. */
   showroom: boolean;
   showroomTagline: string;
-  set: (patch: Partial<Pick<OnlineState, 'enabled' | 'subdomain' | 'showroom' | 'showroomTagline'>>) => void;
+  /** Customers can create an account on the online store to see orders and balances. */
+  customerAccounts: boolean;
+  set: (patch: Partial<Pick<OnlineState, 'enabled' | 'subdomain' | 'showroom' | 'showroomTagline' | 'customerAccounts'>>) => void;
 }
 
 export const useOnline = create<OnlineState>()(
@@ -19,6 +21,7 @@ export const useOnline = create<OnlineState>()(
       subdomain: 'nova-downtown',
       showroom: false,
       showroomTagline: '',
+      customerAccounts: false,
       set: (patch) => set(patch),
     }),
     { name: 'nova-online-v1' },

@@ -133,7 +133,7 @@ export function CatalogPage() {
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [selectedBrand, setSelectedBrand] = useState('all');
   const [selectedSupplier, setSelectedSupplier] = useState('all');
-  const [selectedStatus, setSelectedStatus] = useState<'all' | 'active' | 'inactive'>('all');
+  const [selectedStatus, setSelectedStatus] = useState<'all' | 'active' | 'inactive'>('active');
   const [tagQ, setTagQ] = useState('');
 
   // Row selection
@@ -161,7 +161,7 @@ export function CatalogPage() {
   const [poQ, setPoQ] = useState('');
   // Lightspeed applies the product filters when you press Search (or Enter);
   // `pending` holds what's typed, the individual states hold what's applied.
-  const [pending, setPending] = useState({ q: initialQ, tagQ: '', category: 'all', brand: 'all', supplier: 'all', status: 'all' as 'all' | 'active' | 'inactive', po: '' });
+  const [pending, setPending] = useState({ q: initialQ, tagQ: '', category: 'all', brand: 'all', supplier: 'all', status: 'active' as 'all' | 'active' | 'inactive', po: '' });
 
   const label = NAV.find((n) => n.key === active)?.label ?? 'Catalog';
   useEffect(() => {

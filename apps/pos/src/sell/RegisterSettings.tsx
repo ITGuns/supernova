@@ -22,16 +22,16 @@ export function RegisterSettings() {
 
       <div className="rs-section">
         <div className="rs-side">
-          <div className="cr-h">Training mode</div>
-          <div className="rs-desc">Enable training mode if you’re new to Nova Retail and want to learn the ropes. You’ll be selling like a pro in no time.</div>
+          <div className="cr-h">Training Mode</div>
+          <div className="rs-desc">Enable Training Mode if you’re new to Nova Retail and want to learn the ropes. You’ll be selling like a pro in no time.</div>
         </div>
         <div className="rs-main">
           <button className="btn-primary" onClick={toggleTraining}>
-            {training ? 'Disable training mode' : 'Enable training mode'}
+            {training ? 'Disable Training Mode' : 'Enable Training Mode'}
           </button>
           {training && (
             <div className="rs-desc rs-training-note">
-              Training mode is on. Sales made on the register are marked as training and won’t
+              Training Mode is already enabled. Sales made on the register are marked as training and won’t
               affect your inventory.
             </div>
           )}
@@ -42,21 +42,21 @@ export function RegisterSettings() {
 
       <div className="rs-section">
         <div className="rs-side">
-          <div className="cr-h">Quick keys</div>
-          <div className="rs-desc">Assign products as quick keys to help process sales faster. Rename, reposition and recolor keys, or organize your buttons into folders and pages.</div>
+          <div className="cr-h">Quick Keys</div>
+          <div className="rs-desc">Assign products as Quick Keys to help process sales faster. Rename, reposition and recolor keys, or organize your buttons into folders and pages.</div>
         </div>
         <div className="rs-main">
           <div className="rs-toggle-row">
             <Switch on={quickKeys} onClick={toggleQuickKeys} />
             <div>
-              <div className="rs-toggle-label">Enable quick keys for this register</div>
+              <div className="rs-toggle-label">Enable Quick Keys for this register</div>
               <div className="rs-desc">Toggle the switch to enable your Quick Keys for your register. You can turn this back on at anytime without losing your settings</div>
             </div>
           </div>
 
           {quickKeys && (
             <>
-              <button className="btn-primary rs-add" onClick={addLayout}>Add layout</button>
+              <button className="btn-primary rs-add" onClick={addLayout}>Add Layout</button>
               <div className="rs-layouts">
                 {layouts.map((l) => (
                   <div key={l.id} className="rs-layout">

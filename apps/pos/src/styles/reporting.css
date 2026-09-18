@@ -209,3 +209,34 @@
 .ur-entries { padding: 6px 14px 12px 52px; border-bottom: 1px solid var(--line); }
 .inv-thead.shr4, .inv-row.shr4 { grid-template-columns: 1.4fr 1fr 2fr 1.4fr; }
 .rep-band { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+
+/* Online overview */
+.on-hero { border: 1px solid var(--line); border-radius: 14px; padding: 26px; background: var(--panel); margin: 0 0 22px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.on-hero p { margin: 0; color: var(--muted); max-width: 640px; }
+.on-h2 { font-size: 18px; font-weight: 700; margin: 22px 0 12px; }
+.on-p { color: var(--muted); margin: 0 0 12px; }
+.on-three, .on-demos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.on-demos { grid-template-columns: repeat(4, 1fr); }
+.on-card { border: 1px solid var(--line); border-radius: 12px; padding: 16px; background: var(--panel); display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; color: var(--muted); }
+.on-card b { color: var(--text); font-size: 15px; }
+.on-card em { font-style: normal; color: var(--link); font-size: 12.5px; }
+.on-compare { width: 100%; max-width: 720px; }
+.on-compare td.c, .on-compare th { text-align: center; }
+.on-compare td:first-child { text-align: left; }
+.on-stats { display: flex; gap: 28px; margin: 0 0 18px; }
+.on-stats div { display: flex; flex-direction: column; }
+.on-stats b { font-size: 28px; }
+.on-stats span { color: var(--muted); font-size: 13px; }
+.on-help { max-width: 640px; }
+/* Home first-run */
+.onb-steps { display: flex; flex-direction: column; gap: 10px; margin: 18px 0 26px; }
+.onb-step { display: flex; align-items: center; gap: 14px; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: var(--panel); }
+.onb-step.done { opacity: 0.75; }
+.onb-step-body { display: flex; flex-direction: column; gap: 3px; flex: 1; font-size: 13.5px; color: var(--muted); }
+.onb-step-body b { font-size: 15px; color: var(--text); }
+.onb-learn { font-size: 13px; }
+.onb-ready { background: var(--panel-2); }
+.onb-know { display: flex; flex-direction: column; gap: 10px; }
+@media (max-width: 900px) { .on-three, .on-demos { grid-template-columns: 1fr; } }
+.rc-head.rc-7, .rc-row.rc-7 { grid-template-columns: 1.2fr 0.4fr 1.6fr 1.6fr 0.9fr 1fr 0.9fr; }
+.rep-fg-btn { display: flex; align-items: flex-end; gap: 12px; }

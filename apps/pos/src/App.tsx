@@ -6,6 +6,7 @@ import { ImportProductsPage } from './admin/ImportProductsPage';
 import { UserEditor } from './admin/UserEditor';
 import { ServicesPage } from './admin/ServicesPage';
 import { ServiceEditor } from './admin/ServiceEditor';
+import { WholesalePage } from './admin/WholesalePage';
 import { PromotionEditor } from './admin/PromotionEditor';
 import { CustomersPage } from './admin/CustomersPage';
 import { FinancePage } from './admin/FinancePage';
@@ -58,6 +59,7 @@ export function App() {
       <Route element={<AdminLayout />}>
         <Route path="/home" element={<HomePage />} />
         <Route path="/online" element={<OnlinePage />} />
+        <Route path="/wholesale" element={<WholesalePage />} />
         <Route path="/reporting" element={<ReportingPage />} />
         <Route path="/catalog" element={<CatalogPage />} />
         <Route path="/catalog/products/new" element={<ProductEditor />} />

@@ -90,6 +90,7 @@ export function SalesHistory() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [confirmVoid, setConfirmVoid] = useState<HSale | null>(null);
   const [notice, setNotice] = useState('');
+  const [, setSearchTick] = useState(0);
 
   // Date presets set the from/to pair; "Custom" leaves the pickers editable.
   const applyPreset = (p: DatePreset) => {
@@ -337,6 +338,7 @@ export function SalesHistory() {
             <div className="shf-actions">
               <span className="rlink" onClick={clearFilters}>Clear filters</span>
               <span className="rlink" onClick={() => setMore((m) => !m)}>{more ? 'Less filters' : 'More filters'}</span>
+              <button className="btn-p" onClick={() => setSearchTick((t) => t + 1)}>Search</button>
             </div>
           </div>
 

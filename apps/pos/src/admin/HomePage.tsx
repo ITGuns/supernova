@@ -108,8 +108,11 @@ export function HomePage() {
     }
   };
   const customersCount = useCustomers((s) => s.customers.length);
+  void customersCount;
   const taxes = useSettings((s) => s.taxes);
   const paymentTypes = useSetup((s) => s.paymentTypes);
+  const outletsCount = useSetup((s) => s.outlets.length);
+  const receiptTemplates = useSetup((s) => s.receiptTemplates.length);
   const fulfillments = useFulfillments((s) => s.fulfillments);
   const counts = useInventory((s) => s.counts);
   const services = useServices((s) => s.services);
@@ -234,13 +237,15 @@ export function HomePage() {
   const periodLabel =
     period === 'Today' ? 'Today’s sales' : `${period}’s sales`;
 
-  const checklist: { title: string; text: string; done: boolean; to: string; state?: Record<string, string> }[] = [
-    { title: 'Add your products', text: 'Build your catalog by hand or import a spreadsheet.', done: products.length > 0, to: '/catalog' },
-    { title: 'Set up sales tax', text: 'Add the tax rates you charge.', done: taxes.some((t) => t.rateBps > 0), to: '/setup', state: { tab: 'taxes' } },
-    { title: 'Choose payment types', text: 'Cash and card are ready; add Venmo, checks or gift vouchers.', done: paymentTypes.length > 2, to: '/setup', state: { tab: 'payments' } },
-    { title: 'Add your team', text: 'Create a user for each person who sells.', done: users.length > 2, to: '/setup', state: { tab: 'users' } },
-    { title: 'Add a customer', text: 'Keep track of sales history and contact details.', done: customersCount > 0, to: '/customers' },
-    { title: 'Make your first sale', text: 'Open the register and ring up a sale.', done: sales.some((s) => !s.training), to: '/sell' },
+  // The setup steps Lightspeed walks a new store through, in its order and words.
+  const checklist: { title: string; text: string; learn: string; action: string; done: boolean; to: string; state?: Record<string, string> }[] = [
+    { title: 'Set up your outlets and registers', text: 'Accurately report on sales performance and manage your inventory.', learn: 'Learn more about outlets and registers', action: 'Add an outlet', done: outletsCount > 0, to: '/setup', state: { tab: 'outlets' } },
+    { title: 'Set up your users and their roles', text: 'Create user accounts and manage what your users are allowed to see and do in Nova Retail.', learn: 'Learn more about setting up users', action: 'Add users', done: users.length > 2, to: '/setup', state: { tab: 'users' } },
+    { title: 'Organize your sales taxes', text: 'To make sure your products, reports and accounting systems all work in sync.', learn: 'Learn more about sales taxes', action: 'Add sales taxes', done: taxes.some((t) => t.rateBps > 0), to: '/setup', state: { tab: 'taxes' } },
+    { title: 'Create different payment types', text: 'Start accepting multiple types of payments in your outlets.', learn: 'Learn more about payment types', action: 'Add payment types', done: paymentTypes.length > 2, to: '/setup', state: { tab: 'payments' } },
+    { title: 'Add your product catalog to Nova Retail', text: 'Build your product catalog so you can start selling products in-store and online.', learn: 'Learn more about adding products', action: 'Add products', done: products.length > 0, to: '/catalog' },
+    { title: 'Update your inventory levels', text: 'Track inventory levels to know exactly which products are in stock and available for sale.', learn: 'Learn more about inventory in Nova Retail', action: 'Update inventory', done: products.some((p) => p.available > 0), to: '/inventory' },
+    { title: 'Customize your receipt templates', text: 'Choose what information you want to show on your receipts and how it should be displayed.', learn: 'Learn more about receipt templates', action: 'Add receipt templates', done: receiptTemplates > 1, to: '/setup', state: { tab: 'outlets' } },
   ];
   const lowStock = products.filter((p) => p.enabled && p.trackInventory !== false && (p.replenishMethod === 'reorder' ? p.reorderPoint != null && availableOf(p, products) <= p.reorderPoint : p.minQty != null && availableOf(p, products) <= p.minQty)).length;
   const openSales = sales.filter((s) => s.status === 'Layaway' || s.status === 'On account').length;
@@ -254,6 +259,66 @@ export function HomePage() {
     ...(countsDue ? [{ title: 'Inventory counts due', text: 'Counts scheduled and ready to start.', count: countsDue, to: '/inventory', state: { tab: 'counts' } }] : []),
     ...(openServices ? [{ title: 'Services in progress', text: 'Jobs booked for customers.', count: openServices, to: '/services' }] : []),
   ];
+
+  if (checklistOpen) {
+    return (
+      <main className="admin-main">
+        <div className="admin-page home-onb">
+          <h1 className="page-title">Hi {firstName}, let’s get your store set up</h1>
+          <div className="page-subbar">Follow our lead to set up the basics so you can get selling quickly</div>
+          <div className="onb-steps">
+            {checklist.map((c) => (
+              <div key={c.title} className={`onb-step ${c.done ? 'done' : ''}`}>
+                <span className="hc-check">{c.done ? '✓' : ''}</span>
+                <div className="onb-step-body">
+                  <b>{c.title}</b>
+                  <span>{c.text}</span>
+                  <span className="rlink onb-learn">{c.learn}</span>
+                </div>
+                <button className="btn-s" onClick={() => navigate(c.to, c.state ? { state: c.state } : undefined)}>{c.action}</button>
+              </div>
+            ))}
+            <div className="onb-step onb-ready">
+              <div className="onb-step-body">
+                <b>Ready to get selling?</b>
+                <span>Once you're done setting up, this dashboard will show you how your business is doing at a glance.</span>
+              </div>
+              <button className="btn-p" onClick={dismissChecklist}>I'm ready to sell</button>
+            </div>
+          </div>
+          <div className="home-grid">
+            <div className="home-col">
+              <div className="home-sec-h">THINGS TO KNOW</div>
+              <div className="onb-know">
+                <div className="on-card"><b>Ready, set, sell</b><span>The quickstart guide will help you configure Nova Retail for your store so you can start selling in no time.</span><span className="rlink">Quickstart guide</span></div>
+                <div className="on-card"><b>Practical tips for growing your business</b><span>Get practical and actionable advice about your Retail store.</span><span className="rlink">Visit the blog</span></div>
+                <div className="on-card"><b>Need technical support?</b><span>Our 24/7 global Support team is ready to help you navigate Nova Retail, wherever you are and whatever you might need.</span><span className="rlink">Get help</span></div>
+              </div>
+            </div>
+            <div className="home-col narrow">
+              <div className="home-sec-h">THINGS TO DO</div>
+              {todos.length === 0 ? (
+                <div className="todo-empty">
+                  <ClipboardGraphic />
+                  <div>There's nothing on your to-do list</div>
+                </div>
+              ) : (
+                <div className="todo-list">
+                  {todos.map((t) => (
+                    <button key={t.title} className="todo-item" onClick={() => navigate(t.to, t.state ? { state: t.state } : undefined)}>
+                      <span className="todo-count">{t.count}</span>
+                      <span className="todo-body"><b>{t.title}</b><span>{t.text}</span></span>
+                      <span className="todo-chev">›</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="admin-main">
@@ -299,25 +364,6 @@ export function HomePage() {
       </div>
 
       <div className="home2-body">
-        {checklistOpen && (
-          <div className="home-checklist">
-            <div className="home-sec-h">
-              SET UP YOUR STORE <span className="sec-more rlink" onClick={dismissChecklist}>Dismiss</span>
-            </div>
-            <div className="hc-cards">
-              {checklist.map((c) => (
-                <button key={c.title} className={`hc-card ${c.done ? 'done' : ''}`} onClick={() => navigate(c.to, c.state ? { state: c.state } : undefined)}>
-                  <span className="hc-check">{c.done ? '✓' : ''}</span>
-                  <span className="hc-body">
-                    <b>{c.title}</b>
-                    <span>{c.text}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-            <div className="hc-progress">{checklist.filter((c) => c.done).length} of {checklist.length} done</div>
-          </div>
-        )}
         {/* Row A — Things to know / Things to do */}
         <div className="home-grid">
           <div className="home-col">
@@ -450,7 +496,7 @@ export function HomePage() {
             <div className="partner-card">
               <PartnerLogo />
               <div className="partner-body">
-                <div className="partner-title">Simplify your team management with Shiftly</div>
+                <div className="partner-title">Simplify your team management with Homebase</div>
                 <div className="partner-text">
                   Unlock the everything app for hourly teams and conquer team management, scheduling and
                   payroll with ease — now offering exclusive pricing for Nova customers.

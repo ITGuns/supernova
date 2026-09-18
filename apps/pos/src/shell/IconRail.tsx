@@ -11,6 +11,7 @@ type IconName =
   | 'inventory'
   | 'customers'
   | 'services'
+  | 'wholesale'
   | 'finance'
   | 'setup';
 
@@ -18,14 +19,15 @@ const TOP: { key: IconName; to: string; label: string }[] = [
   { key: 'home', to: '/home', label: 'Home' },
   { key: 'sell', to: '/sell', label: 'Sell' },
   { key: 'online', to: '/online', label: 'Online' },
+  { key: 'wholesale', to: '/wholesale', label: 'Wholesale' },
 ];
 
 const MAIN: { key: IconName; to: string; label: string }[] = [
   { key: 'reporting', to: '/reporting', label: 'Reporting' },
   { key: 'catalog', to: '/catalog', label: 'Catalog' },
+  { key: 'services', to: '/services', label: 'Services' },
   { key: 'inventory', to: '/inventory', label: 'Inventory' },
   { key: 'customers', to: '/customers', label: 'Customers' },
-  { key: 'services', to: '/services', label: 'Services' },
   { key: 'setup', to: '/setup', label: 'Setup' },
 ];
 
@@ -46,6 +48,13 @@ function Icon({ name }: { name: IconName }) {
         <svg {...c}>
           <path d="M3 11 12 4l9 7" />
           <path d="M5 10v10h14V10" />
+        </svg>
+      );
+    case 'wholesale':
+      return (
+        <svg {...c}>
+          <path d="M3 7h18l-2 12H5L3 7Z" />
+          <path d="M8 7V5a4 4 0 0 1 8 0v2" />
         </svg>
       );
     case 'services':

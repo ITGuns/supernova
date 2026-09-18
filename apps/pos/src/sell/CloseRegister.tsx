@@ -136,13 +136,13 @@ export function CloseRegister() {
       <div className="sell-subbar">Close your register to finalize payments and sales for the day.</div>
 
       <div className="cr2-row">
-        <div className="cr2-side"><div className="cr-h">Register details</div></div>
+        <div className="cr2-side"><div className="cr-h">Register Details</div></div>
         <div className="cr2-main">
           <div className="cr2-details">
             <div><span>Outlet</span><b>{outlet?.name ?? 'Main Outlet'}</b></div>
             <div><span>Register</span><b>{outlet?.registers[0] ?? 'Main Register'}</b></div>
             <div><span>Closure #</span><b>{closureSeq}</b></div>
-            <div><span>Opening time</span><b>{openedAt ? time(openedAt) : 'Today'}</b></div>
+            <div><span>Opening time</span><b>{openedAt ? new Date(openedAt).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Today'}</b></div>
           </div>
         </div>
       </div>
@@ -173,7 +173,7 @@ export function CloseRegister() {
           ))}
           {countMode === 'denomination' && (
             <div className="cr-count-row">
-              <span>Custom amount</span>
+              <span>Custom Amount</span>
               <span className="c">—</span>
               <span className="r"><input className="cr-custom" type="number" step="0.01" value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="0.00" /></span>
             </div>
@@ -183,7 +183,7 @@ export function CloseRegister() {
       </div>
 
       <div className="cr2-row">
-        <div className="cr2-side"><div className="cr-h">Payments summary</div><div className="set-desc">Balance your register by entering the amount counted from the till and other payment terminals into the empty fields here.</div></div>
+        <div className="cr2-side"><div className="cr-h">Payments Summary</div><div className="set-desc">Balance your register by entering the amount counted from the till and other payment terminals into the empty fields here.</div></div>
         <div className="cr2-main">
           <div className="cr-pay-head"><span>Payment types</span><span className="r">Expected ($)</span><span className="r">Counted ($)</span><span className="r">Differences ($)</span></div>
 
@@ -246,7 +246,7 @@ export function CloseRegister() {
       </div>
 
       <div className="cr2-row">
-        <div className="cr2-side"><div className="cr-h">Closing summary</div></div>
+        <div className="cr2-side"><div className="cr-h">Closing Summary</div></div>
         <div className="cr2-main">
           <div className="cr2-note">
             <label>Note</label>

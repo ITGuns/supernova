@@ -19,18 +19,18 @@ import { Sparkline } from './Sparkline';
 import '../styles/reporting.css';
 
 const NAV: ContextItem[] = [
-  { key: 'dashboard', label: 'Retail dashboard' },
-  { key: 'sales', label: 'Sales reports' },
-  { key: 'inventory', label: 'Inventory reports' },
+  { key: 'dashboard', label: 'Retail Dashboard' },
+  { key: 'sales', label: 'Sales Reports' },
+  { key: 'inventory', label: 'Inventory Reports' },
   { key: 'adjustment', label: 'Adjustment reports' },
   { key: 'cash', label: 'Cash movement reports' },
-  { key: 'payment', label: 'Payment reports' },
-  { key: 'register', label: 'Register closures' },
-  { key: 'gift', label: 'Gift card reports' },
-  { key: 'storecredit', label: 'Store credit reports' },
-  { key: 'tax', label: 'Tax reports' },
-  { key: 'user', label: 'User reports' },
-  { key: 'shared', label: 'Shared reports' },
+  { key: 'payment', label: 'Payment Reports' },
+  { key: 'register', label: 'Register Closures' },
+  { key: 'gift', label: 'Gift Card Reports' },
+  { key: 'storecredit', label: 'Store Credit Reports' },
+  { key: 'tax', label: 'Tax Reports' },
+  { key: 'user', label: 'User Reports' },
+  { key: 'shared', label: 'Shared Reports' },
 ];
 
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -293,6 +293,8 @@ export function ReportingPage() {
   const [salesTab, setSalesTab] = useState<'summary' | 'individual' | 'hour'>('summary');
   const [salesView, setSalesView] = useState<'table' | 'chart'>('table');
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [formatOpen, setFormatOpen] = useState(false);
+  const [hiddenCols, setHiddenCols] = useState<string[]>([]);
   const [shareModal, setShareModal] = useState<{ report: string; recipients: string } | null>(null);
   const [shareError, setShareError] = useState('');
   const sharedReports = useSharedReports((s) => s.shared);
@@ -319,6 +321,7 @@ export function ReportingPage() {
 
   // Tax report
   const [taxRange, setTaxRange] = useState(() => rangeLabel(new Date(today().getFullYear(), today().getMonth(), 1), today()));
+  const [taxReportType, setTaxReportType] = useState('Tax code');
   const taxParsedRange = useMemo(() => parseRange(taxRange), [taxRange]);
   const taxFiltered = useMemo(
     () => sales.filter((s) => s.status !== 'Returned' && s.at >= taxParsedRange.start.getTime() && s.at <= taxParsedRange.end.getTime()),
@@ -655,10 +658,10 @@ export function ReportingPage() {
     { label: 'Sale count', value: String(curB.count), series: bs.map((b) => b.count), fmtY: String },
     { label: 'Customer count', value: curB.custs > 0 ? String(curB.custs) : '-', series: bs.map((b) => b.custs), fmtY: trim },
     { label: 'Gross profit', value: money(curB.profit), series: bs.map((b) => b.profit / 100), fmtY: kMoney },
+    { label: 'Discounted', value: money(curB.discounted), series: bs.map((b) => b.discounted / 100), fmtY: kMoney },
+    { label: 'Discounted %', value: `${(curB.rev + curB.discounted > 0 ? (curB.discounted / (curB.rev + curB.discounted)) * 100 : 0).toFixed(2)}%`, series: bs.map((b) => (b.rev + b.discounted > 0 ? (b.discounted / (b.rev + b.discounted)) * 100 : 0)), fmtY: trim },
     { label: 'Avg. sale value', value: money(curB.count ? Math.round(curB.rev / curB.count) : 0), series: bs.map((b) => (b.count ? b.rev / b.count / 100 : 0)), fmtY: trim },
     { label: 'Avg. items per sale', value: curB.count ? trim(curB.items / curB.count) : '0', series: bs.map((b) => (b.count ? b.items / b.count : 0)), fmtY: trim },
-    { label: 'Discounted', value: money(curB.discounted), series: bs.map((b) => b.discounted / 100), fmtY: kMoney },
-    { label: 'Discounted %', value: `${curB.rev + curB.discounted > 0 ? trim((curB.discounted / (curB.rev + curB.discounted)) * 100) : '0'}%`, series: bs.map((b) => (b.rev + b.discounted > 0 ? (b.discounted / (b.rev + b.discounted)) * 100 : 0)), fmtY: trim },
   ].map((k) => ({ ...k, yTicks: niceTicks(Math.max(...k.series)) }));
 
   // Register closures: real history from the register session store, with the
@@ -855,25 +858,19 @@ export function ReportingPage() {
               </div>
               <div className="rc-scroll">
                 <div className="rc-table">
-                  <div className="rc-head rc-real rc-11">
+                  <div className="rc-head rc-real rc-7">
                     <span>Register</span><span className="r">#</span><span>Time Opened</span><span>Time Closed ▾</span>
-                    <span className="r">Opening Float</span><span className="r">Cash</span><span className="r">Store Credit</span><span className="r">Total</span><span className="r">Expected</span><span className="r">Counted</span><span className="r">Variance</span>
+                    <span className="r">Cash</span><span className="r">Store Credit</span><span className="r">Total</span>
                   </div>
                   {pageRows.map((r, i) => (
-                    <div key={`${r.num}-${r.opened}`} className={`rc-row rc-real rc-11 ${i % 2 ? 'alt' : ''}`}>
+                    <div key={`${r.num}-${r.opened}`} className={`rc-row rc-real rc-7 ${i % 2 ? 'alt' : ''}`} title={r.open ? '' : `Opening float ${fmt(r.openingFloat)} · expected ${r.expected === null ? '-' : fmt(r.expected)} · counted ${r.counted === null ? '-' : fmt(r.counted)} · variance ${r.variance === null ? '-' : fmt(r.variance)}`}>
                       <span className="rc-reg">Main Register</span>
                       <span className="r">{r.num}</span>
                       <span>{fmtDateTime(new Date(r.opened))}</span>
                       <span className={r.open ? 'rc-open' : ''}>{r.open ? 'Still open' : fmtDateTime(new Date(r.closed!))}</span>
-                      <span className="r">{fmt(r.openingFloat)}</span>
-                      <span className="r">{fmt(r.cash)}</span>
-                      <span className="r">{fmt(r.storeCredit)}</span>
-                      <span className="r">{fmt(r.total)}</span>
-                      <span className="r">{r.expected === null ? '-' : fmt(r.expected)}</span>
-                      <span className="r">{r.counted === null ? '-' : fmt(r.counted)}</span>
-                      <span className={`r ${r.variance === null || r.variance === 0 ? '' : r.variance < 0 ? 'var-neg' : 'var-pos'}`}>
-                        {r.variance === null ? '-' : fmt(r.variance)}
-                      </span>
+                      <span className="r">{r.open ? '-' : (r.cash / 100).toFixed(2)}</span>
+                      <span className="r">{r.open ? '-' : (r.storeCredit / 100).toFixed(2)}</span>
+                      <span className="r">{(r.total / 100).toFixed(2)}</span>
                     </div>
                   ))}
                   {closureRows.length === 0 && <div className="rc-empty">No register closures for this period.</div>}
@@ -991,7 +988,7 @@ export function ReportingPage() {
                 </span>
               </div>
               <div className="gc-table">
-                <div className="gc-head"><span>Gift card (sale)</span><span className="r">Total sold</span><span className="r">Total redeemed</span><span className="r">Balance</span></div>
+                <div className="gc-head"><span>Gift card number</span><span className="r">Total sold</span><span className="r">Total redeemed</span><span className="r">Balance</span></div>
                 <div className="gc-body">
                   {gcLoading ? (
                     <div className="spinner" />
@@ -1030,7 +1027,7 @@ export function ReportingPage() {
                   <button key={k} className={`sh-tab ${invTab === k ? 'active' : ''}`} onClick={() => setInvTab(k)}>{label}</button>
                 ))}
               </div>
-              <div className="rep-band"><span>Get an overview of inventory and its performance over time.</span></div>
+              <div className="rep-band"><span>Track inventory performance and make smarter buying decisions. <span className="rlink">Need help?</span></span></div>
               {invTab === 'summary' ? (
                 <>
                   <div className="rep-filter">
@@ -1044,20 +1041,25 @@ export function ReportingPage() {
                       </select>
                     </div>
                     <div className="rep-fg">
-                      <label>Measure</label>
+                      <label>Date range</label>
+                      <div className="rep-daterange">📅 {rangeLabel(invRange.start, invRange.end)}</div>
+                    </div>
+                    <div className="rep-fg">
+                      <label>Primary measure</label>
                       <select value={invMeasure} onChange={(e) => setInvMeasure(e.target.value)}>
                         <option>Low inventory</option>
                         <option>Closing inventory</option>
                         <option>Revenue</option>
                       </select>
                     </div>
-                    <div className="rep-fg">
-                      <label>Date range</label>
-                      <div className="rep-daterange">📅 {rangeLabel(invRange.start, invRange.end)}</div>
+                    <div className="rep-fg rep-fg-btn">
+                      <span className="rlink">More filters</span>
+                      <button className="btn-p">Search</button>
                     </div>
                   </div>
                   <div className="rep-toolbar">
-                    <span className="rlink" onClick={() => downloadCSV('inventory-report.csv', [['Product', 'Closing inventory', 'Revenue', 'Inventory cost'], ...invMetrics.list.map((item) => [item.name, String(item.closing), fmt(item.revenue), fmt(item.cost)])])}>⤓ Export report…</span>
+                    <span className="rlink">⇄ Format results</span>
+                    <span className="rlink" onClick={() => downloadCSV('inventory-report.csv', [['Product', 'Closing inventory', 'Revenue', 'Inventory cost'], ...invMetrics.list.map((item) => [item.name, String(item.closing), fmt(item.revenue), fmt(item.cost)])])}>⤓ Export report...</span>
                   </div>
                   <div className="ir-table">
                     <div className="ir-grouphead"><span /><span className="ir-hist">HISTORICAL ⓘ</span></div>
@@ -1193,6 +1195,22 @@ export function ReportingPage() {
                   <button type="button" className={salesView === 'chart' ? 'active' : ''} onClick={() => setSalesView('chart')}>Chart</button>
                 </span>
               </div>
+              <div className="rep-toolbar">
+                <span className="rep-actions-wrap">
+                  <span className="rlink" onClick={() => setFormatOpen((o) => !o)}>⇄ Format results</span>
+                  {formatOpen && (
+                    <span className="rep-actions-menu rep-format" onMouseLeave={() => setFormatOpen(false)}>
+                      {(['Cost of goods sold', 'Gross profit', 'Margin (%)', 'Tax'] as const).map((c) => (
+                        <label key={c} className="pe-check" style={{ margin: '4px 12px' }}>
+                          <input type="checkbox" checked={!hiddenCols.includes(c)} onChange={() => setHiddenCols((h) => (h.includes(c) ? h.filter((x) => x !== c) : [...h, c]))} />
+                          <span>{c}</span>
+                        </label>
+                      ))}
+                    </span>
+                  )}
+                </span>
+                <span className="rlink" onClick={() => downloadCSV('sales-report.csv', [['Sales summary', 'Revenue', 'Cost of goods sold', 'Gross profit', 'Margin (%)', 'Tax'], ['Totals', fmt(salesMetrics.revenue), fmt(salesMetrics.cogs), fmt(salesMetrics.profit), `${salesMetrics.margin}%`, fmt(salesMetrics.tax)]])}>⤓ Export report...</span>
+              </div>
               {salesView === 'chart' ? (
                 <div className="rep-table wide">
                   <div className="rep-table-h">Revenue by day</div>
@@ -1258,19 +1276,19 @@ export function ReportingPage() {
                     <span>Sales summary</span>
                     <span className="r">{dayHeaderLabel}</span>
                     <span className="r ps-sortable">Revenue <SortGlyph /></span>
-                    <span className="r ps-sortable">Cost of goods sold <SortGlyph /></span>
-                    <span className="r ps-sortable">Gross profit <SortGlyph /></span>
-                    <span className="r ps-sortable">Margin (%) <SortGlyph /></span>
-                    <span className="r ps-sortable">Tax <SortGlyph /></span>
+                    <span className="r ps-sortable">{hiddenCols.includes('Cost of goods sold') ? '' : <>Cost of goods sold <SortGlyph /></>}</span>
+                    <span className="r ps-sortable">{hiddenCols.includes('Gross profit') ? '' : <>Gross profit <SortGlyph /></>}</span>
+                    <span className="r ps-sortable">{hiddenCols.includes('Margin (%)') ? '' : <>Margin (%) <SortGlyph /></>}</span>
+                    <span className="r ps-sortable">{hiddenCols.includes('Tax') ? '' : <>Tax <SortGlyph /></>}</span>
                   </div>
                   <div className="sr-row totals">
                     <span>Totals</span>
                     <span className="r">{fmt(salesMetrics.revenue)}</span>
                     <span className="r">{fmt(salesMetrics.revenue)}</span>
-                    <span className="r">{fmt(salesMetrics.cogs)}</span>
-                    <span className="r">{fmt(salesMetrics.profit)}</span>
-                    <span className="r">{salesMetrics.margin}%</span>
-                    <span className="r">{fmt(salesMetrics.tax)}</span>
+                    <span className="r">{hiddenCols.includes('Cost of goods sold') ? '' : fmt(salesMetrics.cogs)}</span>
+                    <span className="r">{hiddenCols.includes('Gross profit') ? '' : fmt(salesMetrics.profit)}</span>
+                    <span className="r">{hiddenCols.includes('Margin (%)') ? '' : `${salesMetrics.margin}%`}</span>
+                    <span className="r">{hiddenCols.includes('Tax') ? '' : fmt(salesMetrics.tax)}</span>
                   </div>
                   <div className="sr-breakdown">
                     <span className="sr-vlabel">TOTALS BY DATE RANGE</span>
@@ -1331,6 +1349,7 @@ export function ReportingPage() {
           ) : active === 'payment' ? (
             <>
               <h1 className="page-title">Payment report</h1>
+              <div className="rep-band"><span>Get an overview of your payment reports.</span></div>
               <div className="rep-band"><span>Get an overview of your payment reports.</span></div>
               <div className="rep-filter">
                 <div className="rep-fg">
@@ -1431,7 +1450,6 @@ export function ReportingPage() {
                 <div className="gc-stat"><span>Total value issued</span><b>{fmt(creditTotal)}</b></div>
                 <div className="gc-stat"><span>Total value redeemed</span><b>{fmt(0)}</b></div>
                 <div className="gc-stat"><span>Outstanding balance</span><b>{fmt(creditTotal)}</b></div>
-                <div className="gc-stat"><span>Customers with credit</span><b>{creditCustomers.length}</b></div>
               </div>
               <div className="gc-table">
                 <div className="gc-head sc-head"><span>Customer</span><span className="r">Total issued</span><span className="r">Total redeemed</span><span className="r">Balance</span></div>
@@ -1479,10 +1497,10 @@ export function ReportingPage() {
                   </div>
                   {partnerOpen && (
                     <div className="partner-card">
-                      <div className="shiftly-logo">shiftly</div>
+                      <div className="shiftly-logo">Homebase</div>
                       <div className="partner-body">
-                        <div className="partner-h">Simplify your team management with shiftly</div>
-                        <div className="partner-t">Unlock the everything app for hourly teams and conquer team scheduling, activity and time cards with ease with the new enhanced shiftly partnership, now offering exclusive pricing for Nova customers.</div>
+                        <div className="partner-h">Simplify your team management with Homebase</div>
+                        <div className="partner-t">Unlock the everything app for hourly teams and conquer team scheduling, activity and time cards with ease with the new enhanced Homebase partnership, now offering exclusive pricing for Nova customers.</div>
                         <span className="rlink">Learn more ↗</span>
                       </div>
                       <span className="rlink partner-dismiss" onClick={() => setPartnerOpen(false)}>Dismiss</span>
@@ -1535,8 +1553,14 @@ export function ReportingPage() {
           ) : active === 'tax' ? (
             <>
               <h1 className="page-title">Tax report</h1>
-              <div className="rep-band"><span>Sales tax collected, by tax rate, for the period.</span></div>
+              <div className="rep-band"><span>Get an overview of your tax reports.</span></div>
               <div className="rep-filter">
+                <div className="rep-fg">
+                  <label>Report type</label>
+                  <select value={taxReportType} onChange={(e) => setTaxReportType(e.target.value)}>
+                    <option>Tax code</option><option>Outlet</option>
+                  </select>
+                </div>
                 <div className="rep-fg">
                   <label>Date range</label>
                   <DateRangeField value={taxRange} onApply={setTaxRange} />
@@ -1571,14 +1595,14 @@ export function ReportingPage() {
                 <div className="gc-stat"><span>Effective rate</span><b>{taxTotals.taxable > 0 ? `${(Math.round((taxTotals.tax / taxTotals.taxable) * 10000) / 100).toFixed(2)}%` : '0%'}</b></div>
               </div>
               <div className="cm-table">
-                <div className="cm-head"><span>TAX CODE</span><span>RATE</span><span>TAX</span><span>REVENUE (EXCL. TAX)</span></div>
+                <div className="cm-head"><span>{taxReportType === 'Outlet' ? 'OUTLET' : 'TAX CODE'}</span><span>RATE</span><span>TAX</span><span>REVENUE (EXCL. TAX)</span></div>
                 {taxRows.length === 0 ? (
                   <div className="cm-empty">No data available for this period</div>
                 ) : (
                   <>
                     {taxRows.map((r) => (
                       <div key={r.label} className="cm-row">
-                        <span>{r.label}<span className="cm-note">{r.count} sale{r.count === 1 ? '' : 's'}</span></span>
+                        <span>{taxReportType === 'Outlet' ? `${outlet === 'All outlets' ? 'Main Outlet' : outlet} · ${r.label}` : r.label}<span className="cm-note">{r.count} sale{r.count === 1 ? '' : 's'}</span></span>
                         <span>{r.ratePct}%</span>
                         <span>{fmt(r.tax)}</span>
                         <span>{fmt(r.taxable)}</span>
@@ -1598,7 +1622,7 @@ export function ReportingPage() {
             <>
               <h1 className="page-title">Shared reports</h1>
               <div className="rep-band">
-                <span>Reports you’ve shared with your team by email, and who receives them.</span>
+                <span>View and manage the schedule of your shared reports.</span>
                 <button className="btn-p" onClick={() => { setShareModal({ report: 'Sales report', recipients: '' }); setShareError(''); }}>Share a report</button>
               </div>
               <div className="atable">
