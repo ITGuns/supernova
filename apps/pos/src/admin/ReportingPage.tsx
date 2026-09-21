@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useCustomers } from '../store/customerStore';
-import { useProducts } from '../store/productStore';
+import type { CustomerRow } from '../data/customers';
+import { useProducts, type Product } from '../store/productStore';
+import { categoryLabel, useCatalogMeta, type MetaEntity } from '../store/catalogMetaStore';
 import { useRegisterSession } from '../store/registerSessionStore';
 import { initials, useUsers } from '../store/userStore';
 import { fmt } from '../lib/format';
 import { ContextNav, type ContextItem } from '../shell/ContextNav';
-import { saleCost, saleRevenue, useCart } from '../store/cartStore';
+import { lineValue, saleCost, saleRevenue, useCart, type CompletedSale, type SaleLine } from '../store/cartStore';
 import { STORE_CREDIT, isCash, methodOf, tenderLabel } from '../lib/tenders';
 import { useInventory } from '../store/inventoryStore';
 import { useSharedReports } from '../store/sharedReportsStore';
@@ -81,6 +83,62 @@ const MEASURES: { label: string; kind: MeasureKind; of: (d: DayTotals) => number
   { label: 'Tax', kind: 'money', of: (d) => d.tax },
 ];
 const measureOf = (label: string, d: DayTotals): number => (MEASURES.find((m) => m.label === label) ?? MEASURES[14]!).of(d);
+/**
+ * Reporting → Report type, in Lightspeed's order. A dimension either groups
+ * whole sales (`perSale`, so Sale count means something) or the lines within
+ * them (`perLine`, where the sale's revenue is split by each line's share).
+ * Returning several keys puts the sale or line in each of them, split evenly —
+ * that is what a multi-tag product needs.
+ */
+interface ReportDim {
+  label: string;
+  /** Column heading for the grouped column. */
+  head: string;
+  perSale?: (s: CompletedSale, ctx: { customers: CustomerRow[]; products: Product[] }) => string[];
+  perLine?: (l: SaleLine, products: Product[], categories: MetaEntity[]) => string[];
+}
+const UNSPEC = 'Unspecified';
+const productOf = (l: SaleLine, products: Product[]): Product | undefined =>
+  products.find((p) => p.id === l.variantId) ?? products.find((p) => p.name === l.name);
+const one = (v: string | undefined | null): string[] => [v && String(v).trim() ? String(v).trim() : UNSPEC];
+
+const REPORT_TYPES: ReportDim[] = [
+  { label: 'Sales summary', head: 'Sales summary' },
+  { label: 'User', head: 'User', perSale: (s) => one(s.soldBy) },
+  { label: 'Outlet', head: 'Outlet', perSale: (s) => one(s.outlet) },
+  { label: 'Register', head: 'Register', perSale: (s) => one(s.register) },
+  { label: 'Customer', head: 'Customer', perSale: (s) => one(s.customer) },
+  {
+    label: 'Customer group',
+    head: 'Customer group',
+    perSale: (s, { customers }) => {
+      if (!s.customer) return [UNSPEC];
+      const c = customers.find((x) => `${x.firstName} ${x.lastName}`.trim().toLowerCase() === s.customer!.trim().toLowerCase());
+      return one(c?.group);
+    },
+  },
+  { label: 'Promotion', head: 'Promotion', perLine: (l) => one(l.promotion) },
+  { label: 'Sales channel', head: 'Sales channel', perSale: (s) => one(s.channel ?? 'In-store') },
+  { label: 'Product', head: 'Product', perLine: (l) => one(l.name) },
+  { label: 'SKU name', head: 'SKU name', perLine: (l, products) => one(productOf(l, products)?.sku) },
+  { label: 'Brand', head: 'Brand', perLine: (l, products) => one(productOf(l, products)?.brand) },
+  { label: 'Supplier', head: 'Supplier', perLine: (l, products) => one(productOf(l, products)?.supplier) },
+  { label: 'Product category', head: 'Product category', perLine: (l, products, categories) => { const id = productOf(l, products)?.categoryId; return one(id ? categoryLabel(categories, id) : undefined); } },
+  {
+    label: 'Tag',
+    head: 'Tag',
+    perLine: (l, products) => {
+      const tags = (productOf(l, products)?.tags ?? []).filter(Boolean);
+      return tags.length ? tags : [UNSPEC];
+    },
+  },
+  {
+    label: 'Variant attribute: size',
+    head: 'Size',
+    perLine: (l, products) => one(productOf(l, products)?.attributes?.find((a) => a.name.toLowerCase() === 'size')?.value),
+  },
+];
+
 const measureText = (label: string, value: number): string => {
   const kind = measureKind(label);
   if (kind === 'money') return fmt(value);
@@ -352,6 +410,7 @@ export function ReportingPage() {
   const regClosures = useRegisterSession((s) => s.closures);
   const customers = useCustomers((s) => s.customers);
   const allProducts = useProducts((s) => s.products);
+  const categories = useCatalogMeta((s) => s.categories);
   const [active, setActive] = useState('dashboard');
 
   // Dashboard filters
@@ -550,24 +609,62 @@ export function ReportingPage() {
   }, [salesFiltered, allProducts, sales, salesParsedRange]);
 
   // Sales by product / by outlet for the report type selector.
-  const salesByProduct = useMemo(() => {
-    const m = new Map<string, { rev: number; qty: number; cogs: number; tax: number }>();
+  // Reporting → Report type. Lightspeed groups the same sales by any of these
+  // dimensions; a sale (or line) with nothing for the dimension falls into the
+  // "Unspecified" bucket rather than vanishing from the totals.
+  const salesGrouped = useMemo(() => {
+    const dim = REPORT_TYPES.find((r) => r.label === salesReport);
+    if (!dim || dim.label === 'Sales summary') return [];
+    const m = new Map<string, { rev: number; qty: number; cogs: number; tax: number; count: number }>();
+    const add = (key: string, rev: number, qty: number, cogs: number, tax: number, whole: boolean) => {
+      const cur = m.get(key) ?? { rev: 0, qty: 0, cogs: 0, tax: 0, count: 0 };
+      cur.rev += rev;
+      cur.qty += qty;
+      cur.cogs += cogs;
+      cur.tax += tax;
+      if (whole) cur.count += 1;
+      m.set(key, cur);
+    };
+
     for (const sale of salesFiltered) {
-      const gross = sale.lines.reduce((a, l) => a + l.unitPriceMinor * l.quantity, 0);
+      if (dim.perSale) {
+        const keys = dim.perSale(sale, { customers, products: allProducts });
+        const share = keys.length > 0 ? 1 / keys.length : 0;
+        for (const key of keys) {
+          add(
+            key,
+            Math.round(saleRevenue(sale) * share),
+            sale.lines.reduce((a, l) => a + l.quantity, 0) * share,
+            Math.round(saleCost(sale, allProducts) * share),
+            Math.round((sale.taxMinor ?? 0) * share),
+            true,
+          );
+        }
+        continue;
+      }
+      // Line dimensions split the sale's revenue by each line's share of it,
+      // so order-level discounts and tax land on the right rows.
+      const gross = sale.lines.reduce((a, l) => a + lineValue(l), 0);
       for (const l of sale.lines) {
-        const value = l.unitPriceMinor * l.quantity * (1 - (l.discountPct ?? 0) / 100);
-        const share = gross > 0 ? value / gross : 0;
-        const cur = m.get(l.name) ?? { rev: 0, qty: 0, cogs: 0, tax: 0 };
-        cur.rev += Math.round(saleRevenue(sale) * share);
-        cur.qty += l.quantity;
-        cur.cogs += (l.costMinor ?? allProducts.find((p) => p.id === l.variantId)?.supplierPriceMinor ?? 0) * l.quantity;
-        cur.tax += Math.round((sale.taxMinor ?? 0) * share);
-        m.set(l.name, cur);
+        const share = gross > 0 ? lineValue(l) / gross : 0;
+        const keys = dim.perLine ? dim.perLine(l, allProducts, categories) : [UNSPEC];
+        const each = keys.length > 0 ? share / keys.length : 0;
+        for (const key of keys) {
+          add(
+            key,
+            Math.round(saleRevenue(sale) * each),
+            l.quantity / Math.max(1, keys.length),
+            (l.costMinor ?? allProducts.find((p) => p.id === l.variantId)?.supplierPriceMinor ?? 0) * l.quantity / Math.max(1, keys.length),
+            Math.round((sale.taxMinor ?? 0) * each),
+            false,
+          );
+        }
       }
     }
-    return [...m.entries()].sort((a, b) => b[1].rev - a[1].rev);
-  }, [salesFiltered, allProducts]);
-  const salesByOutlet = useMemo(() => [{ name: outlet === 'All outlets' ? 'Main Outlet' : outlet, ...salesMetrics, count: salesFiltered.length }], [outlet, salesMetrics, salesFiltered.length]);
+    return [...m.entries()]
+      .map(([name, v]) => ({ name, ...v, qty: Math.round(v.qty * 100) / 100 }))
+      .sort((a, b) => b.rev - a.rev);
+  }, [salesReport, salesFiltered, allProducts, customers, categories]);
 
   // Individual performance: what each staff member sold in the range.
   const salesByUser = useMemo(() => {
@@ -1287,7 +1384,7 @@ export function ReportingPage() {
                     <div className="rep-fg">
                       <label>Report type</label>
                       <select value={salesReport} onChange={(e) => setSalesReport(e.target.value)}>
-                        <option>Sales summary</option><option>Sales by product</option><option>Sales by outlet</option>
+                        {REPORT_TYPES.map((r) => <option key={r.label}>{r.label}</option>)}
                       </select>
                     </div>
                     <div className="rep-fg">
@@ -1372,38 +1469,27 @@ export function ReportingPage() {
               ) : salesTab === 'summary' && salesReport !== 'Sales summary' ? (
                 <div className="rep-table wide">
                   <div className="rep-table-h">{salesReport}</div>
-                  <div className="tsp-head">
-                    <span>{salesReport === 'Sales by product' ? 'Product' : 'Outlet'}</span>
+                  <div className="tsp-head tsp-7">
+                    <span>{REPORT_TYPES.find((r) => r.label === salesReport)?.head ?? salesReport}</span>
                     <span className="r">Revenue</span>
-                    <span className="r">{salesReport === 'Sales by product' ? 'Items sold' : 'Sale count'}</span>
+                    <span className="r">Items sold</span>
+                    <span className="r">Sale count</span>
                     <span className="r">Cost of goods sold</span>
                     <span className="r">Gross profit</span>
                     <span className="r">Tax</span>
                   </div>
-                  {salesReport === 'Sales by product' ? (
-                    salesByProduct.length === 0 ? (
-                      <div className="rep-empty">No data available for this period.</div>
-                    ) : (
-                      salesByProduct.map(([name, v]) => (
-                        <div key={name} className="tsp-row">
-                          <span className="rlink">{name}</span>
-                          <span className="r">{fmt(v.rev)}</span>
-                          <span className="r">{v.qty}</span>
-                          <span className="r">{fmt(v.cogs)}</span>
-                          <span className="r">{fmt(v.rev - v.cogs)}</span>
-                          <span className="r">{fmt(v.tax)}</span>
-                        </div>
-                      ))
-                    )
+                  {salesGrouped.length === 0 ? (
+                    <div className="rep-empty">No data available for this period.</div>
                   ) : (
-                    salesByOutlet.map((o) => (
-                      <div key={o.name} className="tsp-row">
-                        <span className="rlink">{o.name}</span>
-                        <span className="r">{fmt(o.revenue)}</span>
-                        <span className="r">{o.count}</span>
-                        <span className="r">{fmt(o.cogs)}</span>
-                        <span className="r">{fmt(o.profit)}</span>
-                        <span className="r">{fmt(o.tax)}</span>
+                    salesGrouped.map((g) => (
+                      <div key={g.name} className="tsp-row tsp-7">
+                        <span className="rlink">{g.name}</span>
+                        <span className="r">{fmt(g.rev)}</span>
+                        <span className="r">{g.qty}</span>
+                        <span className="r">{g.count || '\u2014'}</span>
+                        <span className="r">{fmt(g.cogs)}</span>
+                        <span className="r">{fmt(g.rev - g.cogs)}</span>
+                        <span className="r">{fmt(g.tax)}</span>
                       </div>
                     ))
                   )}

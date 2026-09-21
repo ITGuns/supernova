@@ -3959,6 +3959,11 @@ input {
 .tsp-row {
   font-size: 14px;
 }
+/* Report type tables carry Sale count as well. */
+.tsp-head.tsp-7,
+.tsp-row.tsp-7 {
+  grid-template-columns: 2fr 1fr 0.9fr 0.9fr 1.2fr 1.2fr 1fr;
+}
 
 /* ===== Report shared filter/toolbar (Cash movement, Inventory) ===== */
 .rep-band {

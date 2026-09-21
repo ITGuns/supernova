@@ -7,6 +7,7 @@ import { priceBookPrice, usePriceBooks } from './priceBookStore';
 import { stockLinesFor, useProducts } from './productStore';
 import { bestPromotion, promoLabel, usePromotions } from './promotionStore';
 import { useRegister } from './registerStore';
+import { useSetup } from './setupStore';
 import { useUsers } from './userStore';
 import { useSerialNumbers } from './serialNumberStore';
 import { useGiftCards } from './giftCardStore';
@@ -117,6 +118,8 @@ export interface SaleLine {
   soldBy?: string;
   serial?: string;
   giftCard?: { number: string };
+  /** Promotion that set this line's price, for reporting by promotion. */
+  promotion?: string;
 }
 
 /**
@@ -156,6 +159,10 @@ export interface CompletedSale {
   returnedLines?: Record<string, number>;
   /** Values of the sale's custom fields (Setup → Workflows). */
   customFields?: Record<string, string>;
+  /** Where the sale was rung up, for Reporting's Report type groupings. */
+  outlet?: string;
+  register?: string;
+  channel?: string;
 }
 
 /** Units of a line that have been returned. */
@@ -335,6 +342,8 @@ let hasTaxColumns = true;
 let hasPaidColumns = true;
 // Whether it has returned_lines / custom_fields from migration 0011.
 let hasReturnColumns = true;
+// Whether it has outlet / register / channel from migration 0013.
+let hasDimensionColumns = true;
 
 /** Parse the numeric part of an order label like "#1002" → 1002. */
 const orderNumToInt = (label: string): number => {
@@ -353,6 +362,7 @@ const saleToRow = (s: CompletedSale): Record<string, unknown> => ({
   ...(hasTaxColumns ? { tax_minor: s.taxMinor ?? 0, discount_minor: s.discountMinor ?? 0 } : {}),
   ...(hasPaidColumns ? { paid_minor: s.paidMinor ?? null, voided_at: s.voidedAt ? new Date(s.voidedAt).toISOString() : null, fulfillment: s.fulfillment ?? null } : {}),
   ...(hasReturnColumns ? { returned_lines: s.returnedLines ?? null, custom_fields: s.customFields ?? {} } : {}),
+  ...(hasDimensionColumns ? { outlet: s.outlet ?? null, register: s.register ?? null, channel: s.channel ?? null } : {}),
   training: s.training ?? false,
   customer_name: s.customer ?? null,
   note: s.note ?? null,
@@ -383,6 +393,9 @@ const rowToSale = (r: Record<string, unknown>): CompletedSale => ({
   refundTenders: (r.refund_tenders as Tender[] | null) ?? [],
   refundedAt: r.refunded_at ? new Date(r.refunded_at as string).getTime() : undefined,
   paidMinor: (r.paid_minor as number | null) ?? undefined,
+  outlet: (r.outlet as string | null) ?? undefined,
+  register: (r.register as string | null) ?? undefined,
+  channel: (r.channel as string | null) ?? undefined,
   voidedAt: r.voided_at ? new Date(r.voided_at as string).getTime() : undefined,
   fulfillment: (r.fulfillment as SaleFulfillment | null) ?? undefined,
   returnedLines: (r.returned_lines as Record<string, number> | null) ?? undefined,
@@ -445,6 +458,7 @@ export const useCart = create<CartState>()(
       hasTaxColumns = 'tax_minor' in salesRows[0];
       hasPaidColumns = 'paid_minor' in salesRows[0];
       hasReturnColumns = 'returned_lines' in salesRows[0];
+      hasDimensionColumns = 'outlet' in salesRows[0];
     } else {
       const [taxProbe, paidProbe, returnProbe] = await Promise.all([dbSales.hasTaxColumns(), dbSales.hasPaidColumns(), dbSales.hasReturnedLines()]);
       if (taxProbe !== null) hasTaxColumns = taxProbe;
@@ -663,6 +677,12 @@ export const useCart = create<CartState>()(
     const userState = useUsers.getState();
     const soldBy = userState.users.find((u) => u.id === userState.currentUserId)?.name ?? 'Staff';
     const number = orderNumber(state.orderSeq);
+    // Where it was rung up, so Reporting can group by outlet / register / channel.
+    const reg = useRegister.getState();
+    const outlet = useSetup.getState().outlets.find((o) => o.id === reg.outletId)?.name
+      ?? useSetup.getState().outlets[0]?.name
+      ?? 'Main Outlet';
+    const register = reg.registerName ?? 'Main Register';
 
     const completed: CompletedSale = {
       ...sale,
@@ -673,6 +693,9 @@ export const useCart = create<CartState>()(
       note: state.orderNote || undefined,
       soldBy,
       status: sale.status ?? 'Completed',
+      outlet,
+      register,
+      channel: 'In-store',
       ...(state.fulfillment ? { fulfillment: { kind: state.fulfillment.kind, status: 'Unfulfilled' as const, note: state.fulfillment.note, updatedAt: Date.now() } } : {}),
       ...(Object.keys(state.customFields).length ? { customFields: state.customFields } : {}),
     };

@@ -530,3 +530,8 @@ update settings set tax_exclusive = true where id = '00000000-0000-0000-0000-000
 
 -- 0012_postal_address.sql
 alter table setup_config add column if not exists contact_postal jsonb not null default '{}';
+
+-- 0013_sale_dimensions.sql
+alter table sales add column if not exists outlet text;                                      -- Reporting → Report type: Outlet
+alter table sales add column if not exists register text;                                    -- Reporting → Report type: Register
+alter table sales add column if not exists channel text;                                     -- Reporting → Report type: Sales channel

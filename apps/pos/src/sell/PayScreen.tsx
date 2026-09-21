@@ -95,6 +95,8 @@ export function PayScreen({ onBack }: { onBack: () => void }) {
       ...(l.soldBy ? { soldBy: l.soldBy } : {}),
       ...(l.serial ? { serial: l.serial } : {}),
       ...(l.giftCard ? { giftCard: l.giftCard } : {}),
+      // priceNote reads "<promotion> · <label>"; keep the name for reporting.
+      ...(l.priceNote ? { promotion: l.priceNote.split(' · ')[0] } : {}),
     }));
 
   /** Deduct store credit / loyalty balances the customer just spent. */
