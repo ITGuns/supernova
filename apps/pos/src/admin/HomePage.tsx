@@ -238,14 +238,14 @@ export function HomePage() {
     period === 'Today' ? 'Today’s sales' : `${period}’s sales`;
 
   // The setup steps Lightspeed walks a new store through, in its order and words.
-  const checklist: { title: string; text: string; learn: string; action: string; done: boolean; to: string; state?: Record<string, string> }[] = [
-    { title: 'Set up your outlets and registers', text: 'Accurately report on sales performance and manage your inventory.', learn: 'Learn more about outlets and registers', action: 'Add an outlet', done: outletsCount > 0, to: '/setup', state: { tab: 'outlets' } },
-    { title: 'Set up your users and their roles', text: 'Create user accounts and manage what your users are allowed to see and do in Nova Retail.', learn: 'Learn more about setting up users', action: 'Add users', done: users.length > 2, to: '/setup', state: { tab: 'users' } },
-    { title: 'Organize your sales taxes', text: 'To make sure your products, reports and accounting systems all work in sync.', learn: 'Learn more about sales taxes', action: 'Add sales taxes', done: taxes.some((t) => t.rateBps > 0), to: '/setup', state: { tab: 'taxes' } },
-    { title: 'Create different payment types', text: 'Start accepting multiple types of payments in your outlets.', learn: 'Learn more about payment types', action: 'Add payment types', done: paymentTypes.length > 2, to: '/setup', state: { tab: 'payments' } },
-    { title: 'Add your product catalog to Nova Retail', text: 'Build your product catalog so you can start selling products in-store and online.', learn: 'Learn more about adding products', action: 'Add products', done: products.length > 0, to: '/catalog' },
-    { title: 'Update your inventory levels', text: 'Track inventory levels to know exactly which products are in stock and available for sale.', learn: 'Learn more about inventory in Nova Retail', action: 'Update inventory', done: products.some((p) => p.available > 0), to: '/inventory' },
-    { title: 'Customize your receipt templates', text: 'Choose what information you want to show on your receipts and how it should be displayed.', learn: 'Learn more about receipt templates', action: 'Add receipt templates', done: receiptTemplates > 1, to: '/setup', state: { tab: 'outlets' } },
+  const checklist: { art: string; title: string; text: string; learn: string; action: string; done: boolean; to: string; state?: Record<string, string> }[] = [
+    { art: '🏪', title: 'Set up your outlets and registers', text: 'Accurately report on sales performance and manage your inventory.', learn: 'Learn more about outlets and registers', action: 'Add an outlet', done: outletsCount > 0, to: '/setup', state: { tab: 'outlets' } },
+    { art: '🙌', title: 'Set up your users and their roles', text: 'Create user accounts and manage what your users are allowed to see and do in Nova Retail.', learn: 'Learn more about setting up users', action: 'Add users', done: users.length > 2, to: '/setup', state: { tab: 'users' } },
+    { art: '🧾', title: 'Organize your sales taxes', text: 'To make sure your products, reports and accounting systems all work in sync.', learn: 'Learn more about sales taxes', action: 'Add sales taxes', done: taxes.some((t) => t.rateBps > 0), to: '/setup', state: { tab: 'taxes' } },
+    { art: '🐷', title: 'Create different payment types', text: 'Start accepting multiple types of payments in your outlets.', learn: 'Learn more about payment types', action: 'Add payment types', done: paymentTypes.length > 2, to: '/setup', state: { tab: 'payments' } },
+    { art: '👕', title: 'Add your product catalog to Nova Retail', text: 'Build your product catalog so you can start selling products in-store and online.', learn: 'Learn more about adding products', action: 'Add products', done: products.length > 0, to: '/catalog' },
+    { art: '📦', title: 'Update your inventory levels', text: 'Track inventory levels to know exactly which products are in stock and available for sale.', learn: 'Learn more about inventory in Nova Retail', action: 'Update inventory', done: products.some((p) => p.available > 0), to: '/inventory' },
+    { art: '🧾', title: 'Customize your receipt templates', text: 'Choose what information you want to show on your receipts and how it should be displayed.', learn: 'Learn more about receipt templates', action: 'Add receipt templates', done: receiptTemplates > 1, to: '/setup', state: { tab: 'outlets' } },
   ];
   const lowStock = products.filter((p) => p.enabled && p.trackInventory !== false && (p.replenishMethod === 'reorder' ? p.reorderPoint != null && availableOf(p, products) <= p.reorderPoint : p.minQty != null && availableOf(p, products) <= p.minQty)).length;
   const openSales = sales.filter((s) => s.status === 'Layaway' || s.status === 'On account').length;
@@ -269,7 +269,7 @@ export function HomePage() {
           <div className="onb-steps">
             {checklist.map((c) => (
               <div key={c.title} className={`onb-step ${c.done ? 'done' : ''}`}>
-                <span className="hc-check">{c.done ? '✓' : ''}</span>
+                <div className="onb-step-art" aria-hidden="true">{c.done ? '✓' : c.art}</div>
                 <div className="onb-step-body">
                   <b>{c.title}</b>
                   <span>{c.text}</span>

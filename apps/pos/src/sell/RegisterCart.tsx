@@ -221,7 +221,7 @@ export function RegisterCart({ onPay }: { onPay: () => void }) {
               <span>−{fmt(p.amountMinor)}</span>
             </div>
           ))}
-          {taxRemoved || totals.taxRows.length <= 1 ? (
+          {empty ? null : taxRemoved || totals.taxRows.length <= 1 ? (
             <div className="dtrow">
               <span>
                 Tax{totals.taxRows[0] && !taxRemoved ? ` · ${totals.taxRows[0].name} ${(totals.taxRows[0].rateBps / 100).toFixed(2).replace(/\.?0+$/, '')}%` : ''}{totals.taxInclusive && !taxRemoved ? ' (included)' : ''}

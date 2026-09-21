@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { downloadCsv } from '../lib/csv';
-import { fmt } from '../lib/format';
+import { fmt, fmtDate } from '../lib/format';
 import { useInventory } from '../store/inventoryStore';
 import { ProductRowPanel } from './ProductRowPanel';
 import { newGiftCardNumber, useGiftCards } from '../store/giftCardStore';
@@ -1026,8 +1026,8 @@ export function CatalogPage() {
                   <span>Product</span>
                   <span>Brand</span>
                   <span>Supplier</span>
-                  <span className="r">Available to sell</span>
                   <span className="r">Special order demand</span>
+                  <span className="r">Available to sell</span>
                   <span className="r">Retail price</span>
                   <span className="c">Active</span>
                   <span>Created</span>
@@ -1070,13 +1070,13 @@ export function CatalogPage() {
                         </span>
                         <span className="rlink">{lead.brand}</span>
                         <span className="rlink">{lead.supplier}</span>
-                        <span className="r">{available}</span>
                         <span className="r">0</span>
+                        <span className="r">{available}</span>
                         <span className="r">{priceLabel}</span>
                         <span className="c" onClick={(e) => e.stopPropagation()}>
                           <Switch on={anyEnabled} onClick={() => members.forEach((m) => (m.enabled === anyEnabled ? toggleActive(m.id) : undefined))} />
                         </span>
-                        <span className="prod-created">{lead.created}</span>
+                        <span className="prod-created">{fmtDate(lead.created)}</span>
                         <span
                           className="c prod-pencil"
                           style={{ cursor: 'pointer' }}

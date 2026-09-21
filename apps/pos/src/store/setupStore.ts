@@ -142,9 +142,22 @@ const toRow = (s: SetupState): Record<string, unknown> => ({
   receipt_templates: s.receiptTemplates,
 });
 
+/** Stores saved before the currency labels were written Lightspeed's way. */
+const CURRENCY_ALIASES: Record<string, string> = {
+  'USD — United States Dollar': 'US Dollar (USD)',
+  'EUR — Euro': 'Euro (EUR)',
+  'GBP — British Pound Sterling': 'British Pound (GBP)',
+  'CAD — Canadian Dollar': 'Canadian Dollar (CAD)',
+  'AUD — Australian Dollar': 'Australian Dollar (AUD)',
+};
+const currencyLabel = (value: unknown): string => {
+  const text = typeof value === 'string' ? value : '';
+  return CURRENCY_ALIASES[text] ?? text;
+};
+
 // Map DB row → Partial<SetupState>.
 const fromRow = (r: Record<string, unknown>): Partial<SetupState> => ({
-  currency: r.currency as string,
+  currency: currencyLabel(r.currency),
   timeZone: r.time_zone as string,
   sequenceNumber: r.sequence_number as string,
   embeddedBarcodes: r.embedded_barcodes as string,
@@ -194,7 +207,7 @@ let hasOutletTaxes = true;
 export const useSetup = create<SetupState>()(
   persist(
     (set, get) => ({
-      currency: 'USD — United States Dollar',
+      currency: 'US Dollar (USD)',
       timeZone: '(UTC-05:00) Eastern Time (US & Canada)',
       sequenceNumber: '10207',
       embeddedBarcodes: 'Disabled',
@@ -262,6 +275,13 @@ export const useSetup = create<SetupState>()(
         dbSetup.save({ connected_apps: connectedApps });
       },
     }),
-    { name: 'nova-setup-v1' },
+    {
+      name: 'nova-setup-v1',
+      // Rewrite a currency saved under the old label so the select still matches.
+      merge: (persisted, current) => {
+        const saved = (persisted ?? {}) as Partial<SetupState>;
+        return { ...current, ...saved, currency: currencyLabel(saved.currency ?? current.currency) };
+      },
+    },
   ),
 );

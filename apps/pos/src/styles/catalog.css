@@ -207,8 +207,9 @@
 .inv-row .rlink.strong {
   font-weight: 600;
 }
+/* Lightspeed groups Clear filters / More filters / Search together on the right. */
 .sc-factions.split {
-  justify-content: space-between;
+  justify-content: flex-end;
 }
 .sc-links {
   display: flex;

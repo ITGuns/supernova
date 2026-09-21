@@ -2006,7 +2006,8 @@ input {
 }
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  /* Lightspeed's retail dashboard lays these out three to a row. */
+  grid-template-columns: repeat(3, 1fr);
   gap: 14px;
   margin-bottom: 20px;
 }

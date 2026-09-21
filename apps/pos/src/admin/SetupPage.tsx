@@ -37,11 +37,11 @@ const NAV: ContextItem[] = [
 ];
 
 const CURRENCIES = [
-  'USD — United States Dollar',
-  'EUR — Euro',
-  'GBP — British Pound Sterling',
-  'CAD — Canadian Dollar',
-  'AUD — Australian Dollar',
+  'US Dollar (USD)',
+  'Euro (EUR)',
+  'British Pound (GBP)',
+  'Canadian Dollar (CAD)',
+  'Australian Dollar (AUD)',
 ];
 
 const TIME_ZONES = [
@@ -196,7 +196,7 @@ export function SetupPage() {
                       <div className="set-field">
                         <label>Local currency</label>
                         <select className="set-select" value={setup.currency} onChange={(e) => setup.set({ currency: e.target.value })}>
-                          {CURRENCIES.map((cur) => <option key={cur}>{cur}</option>)}
+                          {(CURRENCIES.includes(setup.currency) ? CURRENCIES : [setup.currency, ...CURRENCIES]).map((cur) => <option key={cur}>{cur}</option>)}
                         </select>
                       </div>
                       <div className="set-field">

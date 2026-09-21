@@ -507,7 +507,7 @@ export function CustomersPage() {
                       onChange={(e) => setPendingGroup(e.target.value)}
                       style={{ height: '38px', minWidth: '180px', background: 'var(--panel)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: '8px', padding: '0 8px' }}
                     >
-                      <option value="all">All groups</option>
+                      <option value="all">All</option>
                       {groups.map((g) => (
                         <option key={g} value={g}>{g}</option>
                       ))}

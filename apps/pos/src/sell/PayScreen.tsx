@@ -4,7 +4,7 @@ import { computeCheckout, useCheckout } from '../lib/checkout';
 import { fmt } from '../lib/format';
 import { verifyPassword } from '../lib/password';
 import { runRules } from '../lib/rules';
-import { CASH, LOYALTY, STORE_CREDIT, giftTender, isCash, isGiftCard, methodOf } from '../lib/tenders';
+import { CASH, LOYALTY, STORE_CREDIT, giftTender, isCash, isGiftCard, methodOf, tenderLabel } from '../lib/tenders';
 import { useCart, type SaleLine, type SaleStatus, type Tender, type TenderMethod } from '../store/cartStore';
 import { useCustomers } from '../store/customerStore';
 import { useGiftCards } from '../store/giftCardStore';
@@ -221,22 +221,23 @@ export function PayScreen({ onBack }: { onBack: () => void }) {
 
   return (
     <div className="pay">
-      <button className="pay-back" onClick={onBack}>‹ Back to sale</button>
-      <div className="pay-amount">
-        <label className="pay-amount-label" htmlFor="pay-amount">Amount to pay</label>
-        <MoneyInput
-          id="pay-amount"
-          className="pay-amount-in"
-          minor={amount}
-          onChange={(v) => {
-            setAmount(v);
-            setAmountEdited(v !== balance);
-          }}
-          disabled={!!panel && panel.kind !== 'cash'}
-        />
-        <div className="pay-amount-sub">
-          {amountFor() < balance ? <>Part payment · balance after this payment {fmt(balance - amountFor())}</> : <>Balance {fmt(balance)}</>}
-          {paidSoFar > 0 && <> · {fmt(paidSoFar)} already paid on this sale</>}
+      <div className="pay-head">
+        <h1 className="pay-h">Pay</h1>
+        <div className="pay-amount">
+          <MoneyInput
+            id="pay-amount"
+            className="pay-amount-in"
+            minor={amount}
+            onChange={(v) => {
+              setAmount(v);
+              setAmountEdited(v !== balance);
+            }}
+            disabled={!!panel && panel.kind !== 'cash'}
+          />
+          <div className="pay-amount-sub">
+            {amountFor() < balance ? <>Balance after this payment {fmt(balance - amountFor())}</> : <>Edit to make a partial payment</>}
+            {paidSoFar > 0 && <> · {fmt(paidSoFar)} already paid on this sale</>}
+          </div>
         </div>
       </div>
 
@@ -313,6 +314,13 @@ export function PayScreen({ onBack }: { onBack: () => void }) {
             <button className="pay-tile" disabled={balance === 0} onClick={() => { setPanel({ kind: 'gift' }); setMsg(''); }}>
               <span className="pay-tile-ic">🎁</span>Gift card
             </button>
+          </div>
+          {!customer && (
+            <div className="pay-addcust">
+              <span className="pay-addcust-ic">☺</span> Add a customer to pay with the following options:
+            </div>
+          )}
+          <div className="pay-tiles">
             {storeCreditEnabled && (
               <button className="pay-tile" disabled={!customer || balance === 0 || creditLeft === 0} title={!customer ? 'Add a customer to use their store credit' : ''} onClick={() => take(STORE_CREDIT, Math.min(amountFor(), creditLeft))}>
                 <span className="pay-tile-ic">◎</span>Store credit
@@ -343,6 +351,105 @@ export function PayScreen({ onBack }: { onBack: () => void }) {
           {change > 0 && <div className="pay-panel-t">Change to give: <b>{fmt(change)}</b></div>}
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * The read-only sale that sits beside the Pay panel, in the place the product
+ * search normally occupies — the same split Lightspeed uses once you hit Pay.
+ * The heading doubles as the way back to the sale.
+ */
+export function PaySaleSummary({ onBack }: { onBack: () => void }) {
+  const lines = useCart((s) => s.lines);
+  const taxRemoved = useCart((s) => s.taxRemoved);
+  const tenders = useCart((s) => s.pendingTenders);
+  const openSaleNumber = useCart((s) => s.openSaleNumber);
+  const sales = useCart((s) => s.sales);
+  const paymentTypes = useSetup((s) => s.paymentTypes);
+  const totals = useCheckout();
+
+  const openSale = openSaleNumber ? sales.find((s) => s.orderNumber === openSaleNumber) : undefined;
+  const paidSoFar = openSale?.paidMinor ?? 0;
+  const taken = tenders.reduce((a, t) => a + t.amountMinor, 0);
+  const balance = Math.max(0, totals.totalMinor - paidSoFar - taken);
+
+  return (
+    <div className="paysale">
+      <button className="paysale-back" onClick={onBack}>
+        <span className="paysale-arrow" aria-hidden="true">←</span> Sale
+      </button>
+
+      <div className="paysale-lines">
+        {lines.map((l) => (
+          <div key={l.lineId} className="paysale-line">
+            <span className="paysale-qty">{l.quantity}</span>
+            <span className="paysale-name">
+              {l.name}
+              {l.serial && <span className="paysale-sub">Serial {l.serial}</span>}
+              {l.giftCard && <span className="paysale-sub">#{l.giftCard.number}</span>}
+            </span>
+            <span className="paysale-amt">
+              {fmt(Math.round(l.unitPriceMinor * l.quantity * (1 - (l.discountPct ?? 0) / 100)))}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="paysale-tot">
+        <div className="paysale-row">
+          <span>Subtotal</span>
+          <span>{fmt(totals.subtotalMinor)}</span>
+        </div>
+        {totals.promotions.map((p) => (
+          <div key={p.name} className="paysale-row">
+            <span>{p.name}</span>
+            <span>−{fmt(p.amountMinor)}</span>
+          </div>
+        ))}
+        {taxRemoved ? (
+          <div className="paysale-row">
+            <span>Tax</span>
+            <span>Removed</span>
+          </div>
+        ) : totals.taxRows.length <= 1 ? (
+          <div className="paysale-row">
+            <span>Tax {totals.taxRows[0]?.name ?? 'No Tax'}</span>
+            <span>{fmt(totals.taxMinor)}</span>
+          </div>
+        ) : (
+          totals.taxRows.map((r) => (
+            <div key={r.id} className="paysale-row">
+              <span>Tax {r.name}</span>
+              <span>{fmt(r.amountMinor)}</span>
+            </div>
+          ))
+        )}
+        <div className="paysale-row grand">
+          <span>
+            SALE TOTAL <i>{totals.itemCount} item{totals.itemCount === 1 ? '' : 's'}</i>
+          </span>
+          <span>{fmt(totals.totalMinor)}</span>
+        </div>
+        {paidSoFar > 0 && (
+          <div className="paysale-row">
+            <span>Already paid</span>
+            <span>{fmt(paidSoFar)}</span>
+          </div>
+        )}
+        {tenders.map((t) => (
+          <div key={t.id} className="paysale-row paid">
+            <span>{isCash(t.method) ? '💵 ' : ''}{tenderLabel(t.method, paymentTypes)}{t.reference ? ` · ${t.reference}` : ''}</span>
+            <span>{fmt(t.amountMinor)}</span>
+          </div>
+        ))}
+        {(taken > 0 || paidSoFar > 0) && (
+          <div className="paysale-row grand">
+            <span>Balance</span>
+            <span>{fmt(balance)}</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

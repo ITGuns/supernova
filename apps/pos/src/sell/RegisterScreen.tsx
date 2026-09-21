@@ -14,7 +14,7 @@ import { useWorkflows } from '../store/workflowStore';
 import { newGiftCardNumber, useGiftCards } from '../store/giftCardStore';
 import { runRules } from '../lib/rules';
 import { ParkedTray } from './ParkedTray';
-import { PayScreen } from './PayScreen';
+import { PayScreen, PaySaleSummary } from './PayScreen';
 import { QuickKeys } from './QuickKeys';
 import { Receipt } from './Receipt';
 import { RegisterCart } from './RegisterCart';
@@ -81,7 +81,7 @@ export function RegisterScreen() {
         {lastSale ? (
           <Receipt />
         ) : payOpen ? (
-          <PayScreen onBack={() => setPayOpen(false)} />
+          <PaySaleSummary onBack={() => setPayOpen(false)} />
         ) : (
         <>
         <div className="reg-label">Search for products</div>
@@ -114,6 +114,10 @@ export function RegisterScreen() {
       </div>
 
       <div className="reg-col reg-cart-col">
+        {payOpen && !lastSale ? (
+          <PayScreen onBack={() => setPayOpen(false)} />
+        ) : (
+          <>
         <div className="reg-actions">
           <button className="reg-action retrieve" onClick={() => setParkedOpen(true)}>
             <span className="ra-ic">↗</span> Retrieve sale
@@ -141,6 +145,8 @@ export function RegisterScreen() {
           </div>
         </div>
         <RegisterCart onPay={() => !empty && setPayOpen(true)} />
+          </>
+        )}
       </div>
       </div>
 

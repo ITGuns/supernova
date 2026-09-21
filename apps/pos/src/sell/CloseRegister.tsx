@@ -136,7 +136,7 @@ export function CloseRegister() {
       <div className="sell-subbar">Close your register to finalize payments and sales for the day.</div>
 
       <div className="cr2-row">
-        <div className="cr2-side"><div className="cr-h">Register Details</div></div>
+        <div className="cr2-side"><div className="cr-h">Register details</div></div>
         <div className="cr2-main">
           <div className="cr2-details">
             <div><span>Outlet</span><b>{outlet?.name ?? 'Main Outlet'}</b></div>
