@@ -4,6 +4,9 @@ import { newId, useSetup, type Outlet, type ReceiptTemplate } from '../store/set
 import '../styles/setup.css';
 
 const pct = (rateBps: number) => `${(rateBps / 100).toFixed(2)}%`;
+/** "No Tax (0%)" already carries its rate; only append one when the name doesn't. */
+const withRate = (label: string, rateBps: number) => (/\(\s*[\d.]+\s*%\s*\)\s*$/.test(label) ? label : `${label} (${(rateBps / 100).toFixed(2)}%)`);
+
 
 export function OutletsSettings() {
   const [tab, setTab] = useState<'outlets' | 'receipts'>('outlets');
@@ -45,7 +48,7 @@ export function OutletsSettings() {
     const taxId = outletTaxes[id];
     const tax = taxId ? taxes.find((t) => t.id === taxId) : undefined;
     const group = taxId ? taxGroups.find((g) => g.id === taxId) : undefined;
-    return tax ? `${tax.label} (${pct(tax.rateBps)})` : group ? group.name : defaultTaxLabel;
+    return tax ? withRate(tax.label, tax.rateBps) : group ? group.name : defaultTaxLabel;
   };
   const addTemplate = () =>
     set({
@@ -138,7 +141,7 @@ export function OutletsSettings() {
                     <span>Default sales tax</span>
                     <select value={wizard.taxId} onChange={(e) => setWizard({ ...wizard, taxId: e.target.value })}>
                       <option value="">Store default ({defaultTaxLabel})</option>
-                      {taxes.map((t) => <option key={t.id} value={t.id}>{t.label} ({pct(t.rateBps)})</option>)}
+                      {taxes.map((t) => <option key={t.id} value={t.id}>{withRate(t.label, t.rateBps)}</option>)}
                       {taxGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
                     </select>
                   </label>
@@ -237,8 +240,8 @@ export function OutletsSettings() {
                       onChange={(e) => set({ outletTaxes: { ...outletTaxes, [o.id]: e.target.value } })}
                       title={outletTaxLabel(o.id)}
                     >
-                      <option value="">{defaultTaxLabel} ({pct(taxes.find((t) => t.label === defaultTaxLabel)?.rateBps ?? 0)})</option>
-                      {taxes.map((t) => <option key={t.id} value={t.id}>{t.label} ({pct(t.rateBps)})</option>)}
+                      <option value="">{withRate(defaultTaxLabel, taxes.find((t) => t.label === defaultTaxLabel)?.rateBps ?? 0)}</option>
+                      {taxes.map((t) => <option key={t.id} value={t.id}>{withRate(t.label, t.rateBps)}</option>)}
                       {taxGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
                     </select>
                   </span>

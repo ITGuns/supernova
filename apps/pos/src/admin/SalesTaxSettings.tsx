@@ -8,6 +8,9 @@ import { NumInput } from './NumInput';
 
 // Display a basis-points rate as a percentage, e.g. 825 → "8.25%".
 const pct = (rateBps: number) => `${(rateBps / 100).toFixed(2).replace(/\.?0+$/, '')}%`;
+/** "No Tax (0%)" already carries its rate; only append one when the name doesn't. */
+const withRate = (label: string, rateBps: number) => (/\(\s*[\d.]+\s*%\s*\)\s*$/.test(label) ? label : `${label} (${(rateBps / 100).toFixed(2)}%)`);
+
 
 export function SalesTaxSettings() {
   const taxes = useSettings((s) => s.taxes);
@@ -161,7 +164,7 @@ export function SalesTaxSettings() {
                   onBlur={() => setOutletEditing(null)}
                 >
                   <option value="">Store default ({defaultTaxLabel})</option>
-                  {taxes.map((t) => <option key={t.id} value={t.id}>{t.label} ({pct(t.rateBps)})</option>)}
+                  {taxes.map((t) => <option key={t.id} value={t.id}>{withRate(t.label, t.rateBps)}</option>)}
                   {taxGroups.map((g) => <option key={g.id} value={g.id}>{g.name} ({pct(groupRate(g))})</option>)}
                 </select>
               ) : (
