@@ -38,6 +38,8 @@ export interface SetupState {
   combineSku: boolean;
   diffPostal: boolean;
   hideOnOrder: boolean;
+  /** Replenishment method new products start with. */
+  defaultReplenish: string;
   // Contact information
   contactFirstName: string;
   contactLastName: string;
@@ -52,6 +54,8 @@ export interface SetupState {
   contactZip: string;
   contactState: string;
   contactCountry: string;
+  /** Separate postal address, used when diffPostal is on. */
+  contactPostal: { street1: string; street2: string; suburb: string; city: string; zip: string; state: string; country: string };
   // Apps + on account
   connectedApps: string[];
   onAccountEnabled: boolean;
@@ -103,6 +107,7 @@ const toRow = (s: SetupState): Record<string, unknown> => ({
   combine_sku: s.combineSku,
   diff_postal: s.diffPostal,
   hide_on_order: s.hideOnOrder,
+  default_replenish: s.defaultReplenish,
   contact_first_name: s.contactFirstName,
   contact_last_name: s.contactLastName,
   contact_email: s.contactEmail,
@@ -116,6 +121,7 @@ const toRow = (s: SetupState): Record<string, unknown> => ({
   contact_zip: s.contactZip,
   contact_state: s.contactState,
   contact_country: s.contactCountry,
+  contact_postal: s.contactPostal,
   connected_apps: s.connectedApps,
   on_account_enabled: s.onAccountEnabled,
   on_account_limit: s.onAccountLimit,
@@ -147,6 +153,7 @@ const fromRow = (r: Record<string, unknown>): Partial<SetupState> => ({
   combineSku: r.combine_sku as boolean,
   diffPostal: r.diff_postal as boolean,
   hideOnOrder: r.hide_on_order as boolean,
+  defaultReplenish: (r.default_replenish as string | null) ?? 'Min and max quantity',
   contactFirstName: r.contact_first_name as string,
   contactLastName: r.contact_last_name as string,
   contactEmail: r.contact_email as string,
@@ -160,6 +167,7 @@ const fromRow = (r: Record<string, unknown>): Partial<SetupState> => ({
   contactZip: r.contact_zip as string,
   contactState: r.contact_state as string,
   contactCountry: r.contact_country as string,
+  contactPostal: { street1: '', street2: '', suburb: '', city: '', zip: '', state: '', country: 'United States', ...((r.contact_postal as Record<string, string> | null) ?? {}) },
   connectedApps: (r.connected_apps as string[]) ?? [],
   onAccountEnabled: r.on_account_enabled as boolean,
   onAccountLimit: r.on_account_limit as string,
@@ -195,6 +203,7 @@ export const useSetup = create<SetupState>()(
       combineSku: true,
       diffPostal: false,
       hideOnOrder: false,
+      defaultReplenish: 'Min and max quantity',
       contactFirstName: '',
       contactLastName: '',
       contactEmail: '',
@@ -208,6 +217,7 @@ export const useSetup = create<SetupState>()(
       contactZip: '',
       contactState: '',
       contactCountry: 'United States',
+      contactPostal: { street1: '', street2: '', suburb: '', city: '', zip: '', state: '', country: 'United States' },
       connectedApps: [],
       onAccountEnabled: true,
       onAccountLimit: '',

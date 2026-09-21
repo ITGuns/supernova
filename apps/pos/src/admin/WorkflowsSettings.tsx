@@ -8,10 +8,10 @@ import { Switch } from './controls';
 const APPLICATIONS: CustomFieldApplication[] = ['Customers', 'Products', 'Sales', 'Users', 'Services'];
 const ENTITIES: Record<CustomFieldApplication, string[]> = {
   Customers: ['Customer'],
-  Products: ['Product', 'Variant'],
-  Sales: ['Sale', 'Sale line'],
+  Products: ['Product'],
+  Sales: ['Sale', 'Sale line item'],
   Users: ['User'],
-  Services: ['Service', 'Service item'],
+  Services: ['Service'],
 };
 const TYPES: CustomFieldType[] = ['Text', 'Number', 'Date', 'Checkbox', 'Dropdown'];
 
@@ -34,7 +34,8 @@ export function WorkflowsSettings() {
   const [ruleModal, setRuleModal] = useState<(Omit<BusinessRule, 'id' | 'createdAt'> & { id?: string }) | null>(null);
   const [error, setError] = useState('');
 
-  const visibleFields = fields.filter((f) => (appFilter === 'all' || f.application === appFilter) && (entityFilter === 'all' || f.entity === entityFilter));
+  const [applied, setApplied] = useState<{ app: 'all' | CustomFieldApplication; entity: string }>({ app: 'all', entity: 'all' });
+  const visibleFields = fields.filter((f) => (applied.app === 'all' || f.application === applied.app) && (applied.entity === 'all' || f.entity === applied.entity));
 
   const saveField = () => {
     if (!fieldModal) return;
@@ -69,7 +70,7 @@ export function WorkflowsSettings() {
       {tab === 'fields' && (
         <>
           <div className="subbar-row">
-            <span>Capture extra information on customers, products, sales and users. <span className="rlink">Need help?</span></span>
+            <span>Custom fields allow you to store custom data about specific products, customers and other entities in Nova Retail. <span className="rlink">Need help?</span></span>
             <button className="btn-p" onClick={() => { setFieldModal({ name: '', application: 'Customers', entity: 'Customer', type: 'Text', options: [] }); setError(''); }}>Add custom field</button>
           </div>
           <div className="sc-filter-card">
@@ -77,16 +78,19 @@ export function WorkflowsSettings() {
               <div className="f-field">
                 <label>Application</label>
                 <select className="set-select" value={appFilter} onChange={(e) => { setAppFilter(e.target.value as typeof appFilter); setEntityFilter('all'); }} style={selStyle}>
-                  <option value="all">All applications</option>
+                  <option value="all">All</option>
                   {APPLICATIONS.map((a) => <option key={a}>{a}</option>)}
                 </select>
               </div>
               <div className="f-field">
                 <label>Entity</label>
                 <select className="set-select" value={entityFilter} onChange={(e) => setEntityFilter(e.target.value)} style={selStyle}>
-                  <option value="all">All entities</option>
+                  <option value="all">All</option>
                   {(appFilter === 'all' ? APPLICATIONS.flatMap((a) => ENTITIES[a]) : ENTITIES[appFilter]).map((e) => <option key={e}>{e}</option>)}
                 </select>
+              </div>
+              <div className="f-field f-field-btn">
+                <button className="btn-p" onClick={() => setApplied({ app: appFilter, entity: entityFilter })}>Search</button>
               </div>
             </div>
           </div>

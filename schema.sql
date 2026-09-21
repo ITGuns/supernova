@@ -527,3 +527,6 @@ alter table products add column if not exists custom_fields jsonb not null defau
 alter table services add column if not exists custom_fields jsonb not null default '{}';
 alter table settings alter column tax_exclusive set default true;
 update settings set tax_exclusive = true where id = '00000000-0000-0000-0000-000000000001';
+
+-- 0012_postal_address.sql
+alter table setup_config add column if not exists contact_postal jsonb not null default '{}';

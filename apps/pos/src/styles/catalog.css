@@ -340,3 +340,6 @@
 .svc-status-row:last-of-type { border-bottom: 0; }
 .cust-p-actions { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
 .cust-p-hint { font-size: 12px; color: var(--muted); }
+.cthead.sup4, .ctrow.sup4 { grid-template-columns: 1.4fr 1.6fr 1fr 1.1fr 1.4fr; }
+.pb-promo { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: var(--panel-2); margin: 0 0 14px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.pb-promo b { color: var(--text); font-size: 14px; }

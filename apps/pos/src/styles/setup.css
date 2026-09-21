@@ -226,3 +226,4 @@
 .athead.wf5, .arow.wf5 { grid-template-columns: 2fr 1.4fr 2fr 0.7fr 0.5fr; }
 .athead.wf3, .arow.wf3 { grid-template-columns: 1.4fr 3fr 0.6fr; }
 .chk-hint { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.f-field-btn { display: flex; align-items: flex-end; }

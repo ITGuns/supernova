@@ -30,9 +30,9 @@ const NAV: ContextItem[] = [
   { key: 'loyalty', label: 'Loyalty' },
   { key: 'users', label: 'Users' },
   { key: 'security', label: 'Security' },
-  { key: 'workflows', label: 'Workflows' },
   { key: 'apps', label: 'Apps' },
   { key: 'storecredit', label: 'Store credit' },
+  { key: 'workflows', label: 'Workflows' },
   { key: 'saved', label: 'Saved payment methods' },
 ];
 
@@ -119,6 +119,13 @@ export function SetupPage() {
     zip: setup.contactZip,
     state: setup.contactState,
     country: setup.contactCountry,
+    postalStreet1: setup.contactPostal.street1,
+    postalStreet2: setup.contactPostal.street2,
+    postalSuburb: setup.contactPostal.suburb,
+    postalCity: setup.contactPostal.city,
+    postalZip: setup.contactPostal.zip,
+    postalState: setup.contactPostal.state,
+    postalCountry: setup.contactPostal.country,
   }));
   const [savedFlash, setSavedFlash] = useState(false);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -142,6 +149,15 @@ export function SetupPage() {
       contactZip: contact.zip,
       contactState: contact.state,
       contactCountry: contact.country,
+      contactPostal: {
+        street1: contact.postalStreet1,
+        street2: contact.postalStreet2,
+        suburb: contact.postalSuburb,
+        city: contact.postalCity,
+        zip: contact.postalZip,
+        state: contact.postalState,
+        country: contact.postalCountry,
+      },
     });
     setSavedFlash(true);
     if (flashTimer.current) clearTimeout(flashTimer.current);
@@ -178,7 +194,7 @@ export function SetupPage() {
                     </div>
                     <div className="set-two">
                       <div className="set-field">
-                        <label>Default currency</label>
+                        <label>Local currency</label>
                         <select className="set-select" value={setup.currency} onChange={(e) => setup.set({ currency: e.target.value })}>
                           {CURRENCIES.map((cur) => <option key={cur}>{cur}</option>)}
                         </select>
@@ -196,13 +212,14 @@ export function SetupPage() {
                 <div className="setrow">
                   <div><div className="set-h">Tax settings</div></div>
                   <div className="set-fields">
+                    <Chk on={taxExclusive} onClick={() => setTaxExclusive(!taxExclusive)} label="Tax exclusive display prices" hint="Enable to display prices without tax." />
                     <div className="set-field">
                       <label>Default sales tax</label>
                       <select className="set-select" value={defaultTaxLabel} onChange={(e) => setDefaultTax(e.target.value)}>
                         {taxes.map((o) => <option key={o.id}>{o.label}</option>)}
                       </select>
+                      <div className="set-note">Used when a product and its outlet have no tax of their own. Set per-outlet defaults under <span className="rlink" onClick={() => setActive('taxes')}>Sales taxes</span>.</div>
                     </div>
-                    <Chk on={taxExclusive} onClick={() => setTaxExclusive(!taxExclusive)} label="Tax exclusive display prices" hint="Show prices without tax and add tax at the register. Leave off to keep tax included in the price shown." />
                   </div>
                 </div>
 
@@ -287,6 +304,29 @@ export function SetupPage() {
                       </select>
                     </div>
                     <Chk on={setup.diffPostal} onClick={() => setup.set({ diffPostal: !setup.diffPostal })} label="Use different address for postal address" />
+                    {setup.diffPostal && (
+                      <>
+                        <div className="set-sub">POSTAL ADDRESS</div>
+                        <div className="set-two">
+                          <div className="set-field"><label>Street address</label><input className="set-input" placeholder="Enter street address line 1" {...c('postalStreet1')} /></div>
+                          <div className="set-field"><label>Street address</label><input className="set-input" placeholder="Enter street address line 2" {...c('postalStreet2')} /></div>
+                        </div>
+                        <div className="set-two">
+                          <div className="set-field"><label>Suburb</label><input className="set-input" placeholder="Enter suburb" {...c('postalSuburb')} /></div>
+                          <div className="set-field"><label>City</label><input className="set-input" placeholder="Enter city" {...c('postalCity')} /></div>
+                        </div>
+                        <div className="set-two">
+                          <div className="set-field"><label>ZIP code</label><input className="set-input" placeholder="Enter ZIP code" {...c('postalZip')} /></div>
+                          <div className="set-field"><label>State</label><input className="set-input" placeholder="Enter state" {...c('postalState')} /></div>
+                        </div>
+                        <div className="set-field">
+                          <label>Country</label>
+                          <select className="set-select" {...c('postalCountry')}>
+                            <option>United States</option><option>Canada</option><option>United Kingdom</option><option>Australia</option>
+                          </select>
+                        </div>
+                      </>
+                    )}
                     <div className="save-row">
                       <button className="btn-p" onClick={saveGeneral}>Save</button>
                       {savedFlash && <span className="saved-flash">✓ Saved</span>}
@@ -376,7 +416,7 @@ export function SetupPage() {
                   <div className="set-fields">
                     <div className="set-field">
                       <label>Default replenish method</label>
-                      <select className="set-select">
+                      <select className="set-select" value={setup.defaultReplenish} onChange={(e) => setup.set({ defaultReplenish: e.target.value })}>
                         <option>Min and max quantity</option>
                         <option>Reorder point</option>
                         <option>Sales velocity</option>

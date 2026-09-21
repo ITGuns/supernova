@@ -428,23 +428,25 @@ export function CatalogPage() {
                 </button>
               </div>
               <div className="ctable">
-                <div className="cthead sup3">
+                <div className="cthead sup4">
                   <span className="cth-s" onClick={() => setSupAsc((v) => !v)}>
                     <span className="cth-label">Supplier</span>
                     <SortIcon dir={supAsc ? 'asc' : 'desc'} />
                   </span>
                   <span>Description</span>
+                  <span>Default markup</span>
                   <span>Number of products</span>
                   <span />
                 </div>
                 {[...suppliers]
                   .sort((a, b) => (supAsc ? 1 : -1) * a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
                   .map((s) => (
-                    <div key={s.id} className="ctrow sup3">
+                    <div key={s.id} className="ctrow sup4">
                       <span className="rlink" onClick={() => navigate(`/catalog/suppliers/${s.id}`)}>
                         {s.name}
                       </span>
                       <span className="ct-muted">{s.description || '—'}</span>
+                      <span>{(s.details?.defaultMarkupBps ?? 0) / 100}%</span>
                       <span>{products.filter((p) => p.supplier === s.name).length}</span>
                       <span className="ct-actions">
                         <span
@@ -800,6 +802,10 @@ export function CatalogPage() {
                   Add price book
                 </button>
               </div>
+              <div className="pb-promo">
+                <b>Manage all your prices in one place</b>
+                <span>Now, you can use price books to manage both in-store and online prices. Set up pricing across channels right from your Nova Retail account.</span>
+              </div>
               <div className="ctable">
                 <div className="cthead pb6">
                   <span>Name</span>
@@ -811,8 +817,8 @@ export function CatalogPage() {
                 </div>
                 <div className="ctrow pb6">
                   <span className="rlink" onClick={() => setActive('products')}>General Price Book (All Products)</span>
-                  <span>All Customers</span>
-                  <span>In-store &amp; Online</span>
+                  <span>All customer groups</span>
+                  <span>Online and 1 more</span>
                   <span className="ct-muted">—</span>
                   <span className="ct-muted">—</span>
                   <span className="ct-muted">With store</span>

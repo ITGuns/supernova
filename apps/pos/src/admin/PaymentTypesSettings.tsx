@@ -81,11 +81,9 @@ export function PaymentTypesSettings() {
       <div className="promo-card">
         <PaymentsGraphic />
         <div>
-          <div className="promo-title">Apply for Nova Payments to process card payments</div>
-          <div className="promo-text">
-            Get everything you need to process sales and get paid, all in one place. Nova Payments
-            applications aren’t available in this demo.
-          </div>
+          <div className="promo-title">Set up Nova Payments to process card payments.</div>
+          <div className="promo-text">Apply for Nova Payments and keep track of your application for each outlet.</div>
+          <button className="btn-s">Talk to an expert</button>
         </div>
       </div>
 

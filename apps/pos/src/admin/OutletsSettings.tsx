@@ -3,7 +3,7 @@ import { useSettings } from '../store/settingsStore';
 import { newId, useSetup, type Outlet, type ReceiptTemplate } from '../store/setupStore';
 import '../styles/setup.css';
 
-const pct = (rateBps: number) => `${(rateBps / 100).toFixed(2).replace(/\.?0+$/, '')}%`;
+const pct = (rateBps: number) => `${(rateBps / 100).toFixed(2)}%`;
 
 export function OutletsSettings() {
   const [tab, setTab] = useState<'outlets' | 'receipts'>('outlets');
@@ -207,8 +207,8 @@ export function OutletsSettings() {
           <div className="atable">
             <div className="athead out out4">
               <span>Outlet</span>
-              <span>Number of registers</span>
               <span>Default tax</span>
+              <span>Number of registers</span>
               <span />
             </div>
             {outlets.map((o) => (
@@ -230,9 +230,6 @@ export function OutletsSettings() {
                       o.name
                     )}
                   </span>
-                  <span>
-                    {o.registers.length} register{o.registers.length === 1 ? '' : 's'}
-                  </span>
                   <span onClick={(e) => e.stopPropagation()}>
                     <select
                       className="set-select out-tax"
@@ -240,10 +237,13 @@ export function OutletsSettings() {
                       onChange={(e) => set({ outletTaxes: { ...outletTaxes, [o.id]: e.target.value } })}
                       title={outletTaxLabel(o.id)}
                     >
-                      <option value="">Store default ({defaultTaxLabel})</option>
+                      <option value="">{defaultTaxLabel} ({pct(taxes.find((t) => t.label === defaultTaxLabel)?.rateBps ?? 0)})</option>
                       {taxes.map((t) => <option key={t.id} value={t.id}>{t.label} ({pct(t.rateBps)})</option>)}
                       {taxGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
                     </select>
+                  </span>
+                  <span>
+                    {o.registers.length} register{o.registers.length === 1 ? '' : 's'}
                   </span>
                   <span
                     className="c out-edit"

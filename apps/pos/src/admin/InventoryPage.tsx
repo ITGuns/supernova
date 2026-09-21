@@ -17,8 +17,8 @@ const NAV: ContextItem[] = [
   { key: 'stock', label: 'Stock control' },
   { key: 'counts', label: 'Inventory counts' },
   { key: 'special', label: 'Special orders' },
-  { key: 'serials', label: 'Serial numbers' },
   { key: 'fulfillments', label: 'Fulfillments' },
+  { key: 'serials', label: 'Serial numbers' },
 ];
 
 /** The "Show" options on Stock control, in Lightspeed's order. */

@@ -28,7 +28,7 @@ export function FulfillmentSettings() {
         <div className="setrow">
           <div>
             <div className="set-h">Sell across stores</div>
-            <div className="set-desc">Let a register sell stock held at another outlet and have that outlet pack and ship the order.</div>
+            <div className="set-desc">Fulfill sales using stock from other outlets when needed. <span className="rlink">Learn more about selling across stores</span></div>
           </div>
           <div className="set-fields">
             <Chk on={f.sellAcrossStores} onClick={() => setF({ sellAcrossStores: !f.sellAcrossStores })} label="Allow selling stock from other outlets" hint={outlets.length > 1 ? `Orders are routed to whichever of your ${outlets.length} outlets has the stock.` : 'You have one outlet — add more under Outlets and registers to route orders between them.'} />
