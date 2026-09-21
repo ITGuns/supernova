@@ -278,11 +278,13 @@ export function RegisterCart({ onPay }: { onPay: () => void }) {
 
       <div className="dcart-add">
         <span className="dcart-add-label">ADD</span>
+        {/* Lightspeed shows the padlock only while the action is out of reach —
+            an empty sale has nothing to discount — and drops it once it works. */}
         <button className={`dcart-add-link ${discountBps > 0 || discountMinor > 0 ? 'on' : ''}`} disabled={empty} onClick={() => setDiscountOpen(true)}>
-          <span className="lock">🔒</span> Discount
+          {empty && <span className="lock">🔒</span>} Discount
         </button>
         <button className={`dcart-add-link ${promoCode ? 'on' : ''}`} disabled={empty} onClick={() => { setPromoOpen((v) => !v); setPromoErr(''); }}>
-          <span className="lock">🔒</span> Promo code{promoCode ? ` · ${promoCode}` : ''}
+          {empty && <span className="lock">🔒</span>} Promo code{promoCode ? ` · ${promoCode}` : ''}
         </button>
         <button className={`dcart-add-link note ${orderNote ? 'on' : ''}`} onClick={() => setShowNote((v) => !v)}>
           Note{orderNote ? ' ●' : ''}

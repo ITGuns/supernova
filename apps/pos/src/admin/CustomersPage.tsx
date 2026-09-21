@@ -615,8 +615,7 @@ export function CustomersPage() {
                         <span>
                           <b>
                             {c.firstName} {c.lastName}
-                          </b>{' '}
-                          <span className="cust-grp">{c.group}</span>
+                          </b>
                           <br />
                           <span className="cust-code">{c.code}</span>
                         </span>

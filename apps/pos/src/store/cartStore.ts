@@ -774,7 +774,16 @@ export const useCart = create<CartState>()(
       ...(hasRefundColumns ? { refund_tenders: allRefunds, refunded_at: new Date(refundedAt).toISOString() } : {}),
       ...(hasReturnColumns ? { returned_lines: returnedLines } : {}),
     });
-    set({ sales: state.sales.map((s) => (s.orderNumber === orderNo ? { ...s, status, refundTenders: allRefunds, refundedAt, returnedLines } : s)) });
+    set({
+      sales: state.sales.map((s) => (s.orderNumber === orderNo ? { ...s, status, refundTenders: allRefunds, refundedAt, returnedLines } : s)),
+      // A part-returned sale still has a receipt worth showing; a fully returned
+      // one does not, so the register stops offering "Sale complete" for it.
+      ...(state.lastSale?.orderNumber === orderNo
+        ? status === 'Returned'
+          ? { lastSale: null, lastSaleNotices: [] }
+          : { lastSale: { ...state.lastSale, status, refundTenders: allRefunds, refundedAt, returnedLines } }
+        : {}),
+    });
     runRules('Refund processed', { totalMinor: refundTenders.reduce((a, t) => a + t.amountMinor, 0), customerName: sale.customer ?? '' });
   },
 
@@ -783,7 +792,10 @@ export const useCart = create<CartState>()(
     const sale = state.sales.find((s) => s.orderNumber === orderNo);
     if (!sale) return;
     dbSales.update(orderNo, { tenders });
-    set({ sales: state.sales.map((s) => (s.orderNumber === orderNo ? { ...s, tenders } : s)) });
+    set({
+      sales: state.sales.map((s) => (s.orderNumber === orderNo ? { ...s, tenders } : s)),
+      ...(state.lastSale?.orderNumber === orderNo ? { lastSale: { ...state.lastSale, tenders } } : {}),
+    });
   },
 
   setFulfillmentStatus: (orderNo, status) => {
@@ -810,7 +822,11 @@ export const useCart = create<CartState>()(
     }
     const voidedAt = Date.now();
     dbSales.update(orderNo, { status: 'Voided', ...(hasPaidColumns ? { voided_at: new Date(voidedAt).toISOString() } : {}) });
-    set({ sales: state.sales.map((s) => (s.orderNumber === orderNo ? { ...s, status: 'Voided' as const, voidedAt } : s)) });
+    set({
+      sales: state.sales.map((s) => (s.orderNumber === orderNo ? { ...s, status: 'Voided' as const, voidedAt } : s)),
+      // The register may still be showing this sale's receipt; a voided sale has none.
+      ...(state.lastSale?.orderNumber === orderNo ? { lastSale: null, lastSaleNotices: [] } : {}),
+    });
   },
 
   continueSale: (orderNo) => {
