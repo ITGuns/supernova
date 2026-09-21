@@ -18,8 +18,12 @@ export interface TaxRow {
 }
 
 export interface CartTotals {
+  /** Sum of the line amounts as each line shows them, i.e. net of line discounts. */
   subtotalMinor: number;
+  /** Every discount on the sale: line-level plus order-level. */
   discountMinor: number;
+  /** Just the order-level part — what the cart prints as its Discount row. */
+  orderDiscountMinor: number;
   taxMinor: number;
   totalMinor: number;
   itemCount: number;
@@ -123,10 +127,13 @@ export function computeTotals(
 
   const subtotalMinor = priced.subtotalMinor;
   const discountMinor = priced.discountTotalMinor;
+  const orderDiscountMinor = priced.orderDiscountMinor;
   // Inclusive tax lives inside the prices, so it never adds to what the customer pays.
   const taxMinor = inclusive ? taxRows.reduce((a, r) => a + r.amountMinor, 0) : tax.taxTotalMinor;
-  const totalMinor = subtotalMinor - discountMinor + (inclusive ? 0 : taxMinor);
+  // Line discounts are already inside subtotalMinor, so only the order-level
+  // part comes off here — subtracting discountMinor would double-count them.
+  const totalMinor = subtotalMinor - orderDiscountMinor + (inclusive ? 0 : taxMinor);
   const itemCount = lines.reduce((s, l) => s + l.quantity, 0);
 
-  return { subtotalMinor, discountMinor, taxMinor, totalMinor, itemCount, pricedLines: priced.lines, taxRows, taxInclusive: inclusive };
+  return { subtotalMinor, discountMinor, orderDiscountMinor, taxMinor, totalMinor, itemCount, pricedLines: priced.lines, taxRows, taxInclusive: inclusive };
 }

@@ -55,6 +55,7 @@ export interface PricedResult {
   readonly lines: readonly PricedLine[];
   readonly subtotalMinor: number; // Σ lineSubtotal before order-level discount
   readonly discountTotalMinor: number; // line + order discounts
+  readonly orderDiscountMinor: number; // the order-level part of discountTotalMinor
 }
 
 import { allocate, roundHalfAwayFromZero } from './money';
@@ -120,8 +121,10 @@ export function priceCart(ctx: PricingContext): PricedResult {
     };
   });
 
-  const subtotalMinor = working.reduce((s, w) => s + w.gross, 0);
+  // Net of line discounts, as the field's contract says: a line that is 10% off
+  // contributes its discounted amount, so subtotal - orderDiscount + tax = total.
+  const subtotalMinor = working.reduce((s, w) => s + w.afterLine, 0);
   const discountTotalMinor = working.reduce((s, w) => s + w.lineDiscount, 0) + orderDiscountTotal;
 
-  return { currency: ctx.currency, lines, subtotalMinor, discountTotalMinor };
+  return { currency: ctx.currency, lines, subtotalMinor, discountTotalMinor, orderDiscountMinor: orderDiscountTotal };
 }

@@ -67,7 +67,9 @@ export function RegisterCart({ onPay }: { onPay: () => void }) {
 
   const totals = useCheckout();
   const empty = lines.length === 0;
-  const manualDiscount = totals.discountMinor - totals.promotions.reduce((a, p) => a + p.amountMinor, 0) - lines.reduce((a, l) => a + Math.round(l.unitPriceMinor * l.quantity * ((l.discountPct ?? 0) / 100)), 0);
+  // The Discount row is the discount typed on the whole sale: the order-level
+  // total less what the promotions below it already account for.
+  const manualDiscount = totals.orderDiscountMinor - totals.promotions.reduce((a, p) => a + p.amountMinor, 0);
   const serialLine = pendingSerial ? lines.find((l) => l.lineId === pendingSerial) : undefined;
   const serialChoices = serialLine ? serials.filter((sn) => sn.productId === serialLine.variantId && sn.status === 'In stock' && !lines.some((l) => l.serial === sn.serial && l.lineId !== serialLine.lineId)) : [];
   const openSale = openSaleNumber ? sales.find((s) => s.orderNumber === openSaleNumber) : undefined;

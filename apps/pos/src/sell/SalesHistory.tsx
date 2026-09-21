@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { fmt } from '../lib/format';
 import { isCash, methodOf, tenderLabel as tenderName } from '../lib/tenders';
-import { refundAmountFor, refundFor, returnedQty, saleBalance, useCart, type CompletedSale, type SaleFulfillment, type Tender } from '../store/cartStore';
+import { lineValue, refundAmountFor, refundFor, returnedQty, saleBalance, useCart, type CompletedSale, type SaleFulfillment, type Tender } from '../store/cartStore';
 import { IntInput } from '../admin/NumInput';
 import { CASH, STORE_CREDIT, isGiftCard } from '../lib/tenders';
 import { FULFILLMENT_LABEL } from '../store/fulfillmentStore';
@@ -24,12 +24,14 @@ interface HSale {
   outlet: string;
   note: string;
   totalMinor: number;
+  taxMinor: number;
+  discountMinor: number;
   balanceMinor: number;
   status: string;
   training: boolean;
   methods: string[];
   tenders: Tender[];
-  lines: { name: string; qty: number; priceMinor: number; note?: string; returned: number; serial?: string }[];
+  lines: { name: string; qty: number; priceMinor: number; discountPct?: number; amountMinor: number; note?: string; returned: number; serial?: string }[];
   /** What a return would (or did) hand back, per tender method. */
   refund: Tender[];
   refundedAt?: number;
@@ -47,6 +49,14 @@ const isoDate = (t: number) => { const d = new Date(t); return `${d.getFullYear(
 const dayStart = (d: string) => new Date(`${d}T00:00:00`).getTime();
 const dayEnd = (d: string) => new Date(`${d}T23:59:59.999`).getTime();
 const fmtDay = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+
+/** Receipt totals that add up: lines, then whatever came off or went on top. */
+const receiptTotals = (s: HSale) => {
+  const linesTotal = s.lines.reduce((a, l) => a + l.amountMinor, 0);
+  const lineDiscounts = s.lines.reduce((a, l) => a + (l.priceMinor * l.qty - l.amountMinor), 0);
+  const orderDiscount = Math.max(0, s.discountMinor - lineDiscounts);
+  return { linesTotal, orderDiscount, taxMinor: s.taxMinor };
+};
 
 export function SalesHistory() {
   const sales = useCart((s) => s.sales);
@@ -122,7 +132,9 @@ export function SalesHistory() {
     training: !!s.training,
     methods: s.tenders.map((t) => t.method),
     tenders: s.tenders,
-    lines: s.lines.map((l, i) => ({ name: l.name, qty: l.quantity, priceMinor: l.unitPriceMinor, note: l.note, returned: returnedQty(s, i), serial: l.serial })),
+    lines: s.lines.map((l, i) => ({ name: l.name, qty: l.quantity, priceMinor: l.unitPriceMinor, discountPct: l.discountPct, amountMinor: lineValue(l), note: l.note, returned: returnedQty(s, i), serial: l.serial })),
+    taxMinor: s.taxMinor ?? 0,
+    discountMinor: s.discountMinor ?? 0,
     fulfillment: s.fulfillment,
     sale: s,
     refund: s.status === 'Returned' ? (s.refundTenders ?? []) : refundFor(s),
@@ -206,7 +218,8 @@ export function SalesHistory() {
   void markReturned;
   const emailReceipt = (s: HSale) => {
     const to = customersList.find((x) => `${x.firstName} ${x.lastName}`.trim() === s.customer)?.email ?? '';
-    const body = [`${storeName} — Receipt ${s.receipt}`, new Date(s.at).toLocaleString(), '', ...s.lines.map((l) => `${l.qty} x ${l.name}  ${fmt(l.priceMinor * l.qty)}`), '', `TOTAL ${fmt(s.totalMinor)}`, ...s.tenders.map((t) => `${tenderLabel(t.method)} ${fmt(t.amountMinor)}`), '', 'Thank you for shopping with us!'].join('\n');
+    const rt = receiptTotals(s);
+    const body = [`${storeName} — Receipt ${s.receipt}`, new Date(s.at).toLocaleString(), '', ...s.lines.map((l) => `${l.qty} x ${l.name}${l.discountPct ? ` (${l.discountPct}% off)` : ''}  ${fmt(l.amountMinor)}`), '', `Subtotal ${fmt(rt.linesTotal)}`, ...(rt.orderDiscount > 0 ? [`Discount -${fmt(rt.orderDiscount)}`] : []), `Tax ${fmt(rt.taxMinor)}`, `TOTAL ${fmt(s.totalMinor)}`, ...s.tenders.map((t) => `${tenderLabel(t.method)} ${fmt(t.amountMinor)}`), '', 'Thank you for shopping with us!'].join('\n');
     window.location.href = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(`Receipt ${s.receipt} from ${storeName}`)}&body=${encodeURIComponent(body)}`;
     setNotice(`Receipt ${s.receipt} opened in your mail app${to ? ` for ${to}` : ''}.`);
   };
@@ -215,9 +228,11 @@ export function SalesHistory() {
     // Print the till receipt of a past sale: swap it into the print area, print, restore.
     const w = window.open('', '_blank', 'width=420,height=640');
     if (!w) return;
-    const lines = s.lines.map((l) => `<div><span>${l.qty}× ${l.name}</span><span>${fmt(l.priceMinor * l.qty)}</span></div>`).join('');
+    const lines = s.lines.map((l) => `<div><span>${l.qty}× ${l.name}${l.discountPct ? ` (${l.discountPct}% off)` : ''}</span><span>${fmt(l.amountMinor)}</span></div>`).join('');
+    const rt = receiptTotals(s);
+    const breakdown = `<div><span>Subtotal</span><span>${fmt(rt.linesTotal)}</span></div>${rt.orderDiscount > 0 ? `<div><span>Discount</span><span>−${fmt(rt.orderDiscount)}</span></div>` : ''}<div><span>Tax</span><span>${fmt(rt.taxMinor)}</span></div>`;
     const tenders = s.tenders.map((t) => `<div><span>${tenderLabel(t.method)}</span><span>${fmt(t.amountMinor)}</span></div>`).join('');
-    w.document.write(`<html><head><title>Receipt ${s.receipt}</title><style>body{font-family:ui-monospace,Menlo,monospace;font-size:12px;padding:16px;width:300px}div{display:flex;justify-content:space-between;margin:2px 0}hr{border:0;border-top:1px dashed #999;margin:8px 0}.g{font-weight:700;font-size:14px}</style></head><body><div><b>Receipt</b><span>${s.receipt}</span></div><div><span>Date</span><span>${new Date(s.at).toLocaleString()}</span></div>${s.customer ? `<div><span>Customer</span><span>${s.customer}</span></div>` : ''}<div><span>Cashier</span><span>${s.soldBy}</span></div><hr/>${lines}<hr/><div class="g"><span>TOTAL</span><span>${fmt(s.totalMinor)}</span></div>${tenders}${s.note ? `<hr/><div>Note: ${s.note}</div>` : ''}<hr/><div><span>Thank you for shopping with us!</span></div></body></html>`);
+    w.document.write(`<html><head><title>Receipt ${s.receipt}</title><style>body{font-family:ui-monospace,Menlo,monospace;font-size:12px;padding:16px;width:300px}div{display:flex;justify-content:space-between;margin:2px 0}hr{border:0;border-top:1px dashed #999;margin:8px 0}.g{font-weight:700;font-size:14px}</style></head><body><div><b>Receipt</b><span>${s.receipt}</span></div><div><span>Date</span><span>${new Date(s.at).toLocaleString()}</span></div>${s.customer ? `<div><span>Customer</span><span>${s.customer}</span></div>` : ''}<div><span>Cashier</span><span>${s.soldBy}</span></div><hr/>${lines}<hr/>${breakdown}<div class="g"><span>TOTAL</span><span>${fmt(s.totalMinor)}</span></div>${tenders}${s.note ? `<hr/><div>Note: ${s.note}</div>` : ''}<hr/><div><span>Thank you for shopping with us!</span></div></body></html>`);
     w.document.close();
     w.focus();
     w.print();
@@ -387,8 +402,8 @@ export function SalesHistory() {
                       <div className="sh-expand">
                         {s.lines.map((l, i) => (
                           <div key={i} className="sh-line">
-                            <span>{l.qty} × {l.name}</span>
-                            <span className="r">{fmt(l.priceMinor * l.qty)}</span>
+                            <span>{l.qty} × {l.name}{l.discountPct ? ` · ${l.discountPct}% off` : ''}</span>
+                            <span className="r">{fmt(l.amountMinor)}</span>
                           </div>
                         ))}
                         {s.tenders.length > 0 && (
@@ -465,7 +480,7 @@ export function SalesHistory() {
                 <div className="pm-lines">
                   {confirmReturn.lines.map((l, i) => (
                     <div key={i} className="pm-line sh-ret-line">
-                      <span className="pm-name">{l.name}{l.serial ? ` · SN ${l.serial}` : ''}<br /><span className="pe-muted">{l.qty} sold{l.returned ? ` · ${l.returned} already returned` : ''} · {fmt(l.priceMinor)} each</span></span>
+                      <span className="pm-name">{l.name}{l.serial ? ` · SN ${l.serial}` : ''}<br /><span className="pe-muted">{l.qty} sold{l.returned ? ` · ${l.returned} already returned` : ''} · {fmt(l.qty ? Math.round(l.amountMinor / l.qty) : l.priceMinor)} each</span></span>
                       <span className="sh-ret-qty">
                         <IntInput className="" int={returnQty[i] ?? 0} onChange={(n) => setReturnQty({ ...returnQty, [i]: Math.max(0, Math.min(l.qty - l.returned, n ?? 0)) })} />
                         <span className="pe-muted">of {l.qty - l.returned}</span>

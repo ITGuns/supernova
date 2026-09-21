@@ -369,8 +369,11 @@ export function PaySaleSummary({ onBack }: { onBack: () => void }) {
   const openSaleNumber = useCart((s) => s.openSaleNumber);
   const sales = useCart((s) => s.sales);
   const paymentTypes = useSetup((s) => s.paymentTypes);
+  const discountBps = useCart((s) => s.orderDiscountBps);
   const totals = useCheckout();
 
+  // The discount typed on the whole sale, less what the promotion rows below cover.
+  const manualDiscount = totals.orderDiscountMinor - totals.promotions.reduce((a, p) => a + p.amountMinor, 0);
   const openSale = openSaleNumber ? sales.find((s) => s.orderNumber === openSaleNumber) : undefined;
   const paidSoFar = openSale?.paidMinor ?? 0;
   const taken = tenders.reduce((a, t) => a + t.amountMinor, 0);
@@ -403,6 +406,12 @@ export function PaySaleSummary({ onBack }: { onBack: () => void }) {
           <span>Subtotal</span>
           <span>{fmt(totals.subtotalMinor)}</span>
         </div>
+        {manualDiscount > 0 && (
+          <div className="paysale-row">
+            <span>Discount{discountBps > 0 ? ` (${discountBps / 100}%)` : ''}</span>
+            <span>−{fmt(manualDiscount)}</span>
+          </div>
+        )}
         {totals.promotions.map((p) => (
           <div key={p.name} className="paysale-row">
             <span>{p.name}</span>

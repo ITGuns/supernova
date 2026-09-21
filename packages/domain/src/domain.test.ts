@@ -72,6 +72,41 @@ describe('priceCart', () => {
     const totalDiscount = res.lines.reduce((s, l) => s + l.lineDiscountMinor, 0);
     expect(totalDiscount).toBe(300);
     expect(res.discountTotalMinor).toBe(300);
+    expect(res.orderDiscountMinor).toBe(300);
+  });
+
+  it('nets line discounts out of the subtotal so the totals reconcile', () => {
+    const res = priceCart({
+      channel: 'RETAIL',
+      currency: 'USD',
+      lines: [{ lineId: 'a', variantId: 'v1', quantity: 1, unitPriceMinor: 4000 }],
+      discounts: [{ id: 'd', name: '10% off', scope: 'LINE', method: 'PERCENT', value: 1000, lineId: 'a' }],
+    });
+    // The register prints Subtotal, then any order discount, then the total.
+    // A line discount belongs in the subtotal, or the three do not add up.
+    expect(res.subtotalMinor).toBe(3600);
+    expect(res.orderDiscountMinor).toBe(0);
+    expect(res.subtotalMinor - res.orderDiscountMinor).toBe(3600);
+  });
+
+  it('keeps subtotal minus order discount equal to what is owed', () => {
+    const res = priceCart({
+      channel: 'RETAIL',
+      currency: 'USD',
+      lines: [
+        { lineId: 'a', variantId: 'v1', quantity: 2, unitPriceMinor: 1000 },
+        { lineId: 'b', variantId: 'v2', quantity: 1, unitPriceMinor: 500 },
+      ],
+      discounts: [
+        { id: 'l', name: '50% off', scope: 'LINE', method: 'PERCENT', value: 5000, lineId: 'a' },
+        { id: 'o', name: '$2 off order', scope: 'ORDER', method: 'FIXED_AMOUNT', value: 200 },
+      ],
+    });
+    expect(res.subtotalMinor).toBe(1500); // 2000 - 1000 line discount, + 500
+    expect(res.orderDiscountMinor).toBe(200);
+    expect(res.discountTotalMinor).toBe(1200); // line + order, what "Discounted" reports
+    const owed = res.lines.reduce((s, l) => s + l.lineSubtotalMinor, 0);
+    expect(res.subtotalMinor - res.orderDiscountMinor).toBe(owed);
   });
 });
 
