@@ -139,6 +139,17 @@ const REPORT_TYPES: ReportDim[] = [
   },
 ];
 
+/** What the dashboard shows out of the box — Lightspeed's eight, in its order. */
+const DASH_DEFAULT = ['Revenue', 'Sale count', 'Customer count', 'Gross profit', 'Discounted', 'Discounted (%)', 'Avg. sale value', 'Avg. items per sale'];
+/** First / last sale are timestamps, so they cannot be a tile. */
+const DASH_MEASURES = MEASURES.filter((m) => m.kind !== 'time').map((m) => m.label);
+/**
+ * Tile order: Lightspeed's eight first, in its order, then the rest as the
+ * measure list has them. Adding a measure appends it rather than reshuffling
+ * the tiles someone is used to.
+ */
+const DASH_ORDER = [...DASH_DEFAULT, ...DASH_MEASURES.filter((m) => !DASH_DEFAULT.includes(m))];
+
 const measureText = (label: string, value: number): string => {
   const kind = measureKind(label);
   if (kind === 'money') return fmt(value);
@@ -439,6 +450,27 @@ export function ReportingPage() {
 
   // Sales report
   const [salesReport, setSalesReport] = useState('Sales summary');
+  const [dashMeasures, setDashMeasures] = useState<string[]>(DASH_DEFAULT);
+  const [dashPickerOpen, setDashPickerOpen] = useState(false);
+  const [dashMore, setDashMore] = useState(false);
+  const [dashKeyword, setDashKeyword] = useState('');
+
+  const dashSales = useMemo(() => {
+    const q = dashKeyword.trim().toLowerCase();
+    if (!q) return sales;
+    return sales.filter((sale) => {
+      const saleText = [sale.outlet, sale.register, sale.channel, sale.customer, sale.soldBy, sale.note].filter(Boolean).join(' ').toLowerCase();
+      if (saleText.includes(q)) return true;
+      return sale.lines.some((l) => {
+        const p2 = allProducts.find((x) => x.id === l.variantId) ?? allProducts.find((x) => x.name === l.name);
+        const text = [l.name, l.promotion, p2?.brand, p2?.supplier, p2?.sku, p2?.categoryId && categoryLabel(categories, p2.categoryId), ...(p2?.tags ?? [])]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return text.includes(q);
+      });
+    });
+  }, [sales, dashKeyword, allProducts, categories]);
   const [salesTab, setSalesTab] = useState<'summary' | 'individual' | 'hour'>('summary');
   const [salesView, setSalesView] = useState<'table' | 'chart'>('table');
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -543,13 +575,20 @@ export function ReportingPage() {
     const buckets = starts.map((d) => {
       const s0 = d.getTime();
       const s1 = bucketEnd(d);
-      const inB = sales.filter((x) => x.status !== 'Returned' && x.status !== 'Voided' && x.at >= s0 && x.at < s1);
-      const rev = inB.reduce((a, x) => a + saleRevenue(x), 0);
-      const items = inB.reduce((a, x) => a + x.lines.reduce((q, l) => q + l.quantity, 0), 0);
-      const custs = new Set(inB.map((x) => x.customer).filter(Boolean)).size;
-      const profit = inB.reduce((a, x) => a + saleRevenue(x) - saleCost(x, allProducts), 0);
-      const discounted = inB.reduce((a, x) => a + (x.discountMinor ?? 0), 0);
-      return { rev, count: inB.length, items, custs, profit, discounted };
+      const allB = dashSales.filter((x) => x.at >= s0 && x.at < s1);
+      const inB = allB.filter((x) => x.status !== 'Returned' && x.status !== 'Voided');
+      return {
+        rev: inB.reduce((a, x) => a + saleRevenue(x), 0),
+        tax: inB.reduce((a, x) => a + (x.taxMinor ?? 0), 0),
+        cogs: inB.reduce((a, x) => a + saleCost(x, allProducts), 0),
+        items: inB.reduce((a, x) => a + x.lines.reduce((q, l) => q + l.quantity, 0), 0),
+        disc: inB.reduce((a, x) => a + (x.discountMinor ?? 0), 0),
+        withCust: inB.filter((x) => !!x.customer).length,
+        count: inB.length,
+        customers: new Set(inB.map((x) => x.customer).filter(Boolean)).size,
+        returns: allB.filter((x) => x.status === 'Returned' || x.status === 'Partially returned').length,
+        all: allB.length,
+      };
     });
     const labels = starts.map((d) =>
       view === 'Month'
@@ -557,7 +596,7 @@ export function ReportingPage() {
         : `${MON[d.getMonth()]} ${d.getDate()}`,
     );
     return { buckets, labels };
-  }, [sales, view, dashDate, allProducts]);
+  }, [dashSales, view, dashDate, allProducts]);
 
   // Date range metrics for Sales Report
   const salesParsedRange = useMemo(() => parseRange(salesRange), [salesRange]);
@@ -881,18 +920,28 @@ export function ReportingPage() {
 
   const money = (minor: number) => (minor === 0 ? '$0' : fmt(minor));
   const bs = dash.buckets;
-  const curB = bs[bs.length - 1] ?? { rev: 0, count: 0, items: 0, custs: 0, profit: 0, discounted: 0 };
+  const emptyTotals: DayTotals = { rev: 0, tax: 0, cogs: 0, items: 0, disc: 0, withCust: 0, count: 0, customers: 0, returns: 0, all: 0 };
+  const curB = bs[bs.length - 1] ?? emptyTotals;
   const trim = (v: number) => String(Math.round(v * 100) / 100);
-  const kpis = [
-    { label: 'Revenue', value: money(curB.rev), series: bs.map((b) => b.rev / 100), fmtY: kMoney },
-    { label: 'Sale count', value: String(curB.count), series: bs.map((b) => b.count), fmtY: String },
-    { label: 'Customer count', value: curB.custs > 0 ? String(curB.custs) : '-', series: bs.map((b) => b.custs), fmtY: trim },
-    { label: 'Gross profit', value: money(curB.profit), series: bs.map((b) => b.profit / 100), fmtY: kMoney },
-    { label: 'Discounted', value: money(curB.discounted), series: bs.map((b) => b.discounted / 100), fmtY: kMoney },
-    { label: 'Discounted %', value: `${(curB.rev + curB.discounted > 0 ? (curB.discounted / (curB.rev + curB.discounted)) * 100 : 0).toFixed(2)}%`, series: bs.map((b) => (b.rev + b.discounted > 0 ? (b.discounted / (b.rev + b.discounted)) * 100 : 0)), fmtY: trim },
-    { label: 'Avg. sale value', value: money(curB.count ? Math.round(curB.rev / curB.count) : 0), series: bs.map((b) => (b.count ? b.rev / b.count / 100 : 0)), fmtY: trim },
-    { label: 'Avg. items per sale', value: curB.count ? trim(curB.items / curB.count) : '0', series: bs.map((b) => (b.count ? b.items / b.count : 0)), fmtY: trim },
-  ].map((k) => ({ ...k, yTicks: niceTicks(Math.max(...k.series)) }));
+  // One tile per chosen measure, plotted with the same formula the sales
+  // report uses. Money measures are held in minor units, so the series is
+  // divided down for the axis.
+  const kpis = dashMeasures
+    .map((label) => {
+      const kind = measureKind(label);
+      const raw = bs.map((b) => measureOf(label, b));
+      const series = kind === 'money' ? raw.map((v) => v / 100) : raw;
+      const current = measureOf(label, curB);
+      const value =
+        kind === 'money' ? money(current)
+        : kind === 'percent' ? `${current.toFixed(2)}%`
+        : kind === 'count' ? (label === 'Customer count' && current === 0 ? '-' : String(current))
+        : trim(current);
+      // Lightspeed's tile drops the brackets the measure list uses.
+      const tileLabel = label === 'Discounted (%)' ? 'Discounted %' : label;
+      return { label: tileLabel, value, series, fmtY: kind === 'money' ? kMoney : kind === 'count' ? String : trim };
+    })
+    .map((k) => ({ ...k, yTicks: niceTicks(Math.max(...k.series)) }));
 
   // Register closures: real history from the register session store, with the
   // currently open session shown as a "Still open" row on top.
@@ -1014,8 +1063,8 @@ export function ReportingPage() {
       view === 'Day' ? s0 + DAY_MS
       : view === 'Week' ? s0 + 7 * DAY_MS
       : new Date(new Date(s0).getFullYear(), new Date(s0).getMonth() + 1, 1).getTime();
-    return sales.filter((s) => s.status !== 'Returned' && s.status !== 'Voided' && s.at >= s0 && s.at < s1);
-  }, [sales, view, dashDate]);
+    return dashSales.filter((s) => s.status !== 'Returned' && s.status !== 'Voided' && s.at >= s0 && s.at < s1);
+  }, [dashSales, view, dashDate]);
 
   // Top sales people for the selected period, grouped by who rang them up.
   const salesPeople = useMemo(() => {
@@ -1904,8 +1953,52 @@ export function ReportingPage() {
                     <option>All outlets</option>
                   </select>
                 </div>
+                <div className="dash-fgroup dash-measure">
+                  <label>Measure</label>
+                  <button className="dash-measure-field" onClick={() => setDashPickerOpen((o) => !o)}>
+                    <span>{dashMeasures.length} of {DASH_MEASURES.length} shown</span>
+                    <span className="drf-chev">▾</span>
+                  </button>
+                  {dashPickerOpen && (
+                    <div className="dash-measure-pop" onMouseLeave={() => setDashPickerOpen(false)}>
+                      <div className="dash-measure-list">
+                        {DASH_MEASURES.map((m) => (
+                          <label key={m} className="dash-measure-opt">
+                            <input
+                              type="checkbox"
+                              checked={dashMeasures.includes(m)}
+                              onChange={() =>
+                                setDashMeasures((cur) =>
+                                  cur.includes(m)
+                                    ? cur.filter((x) => x !== m)
+                                    : DASH_ORDER.filter((x) => cur.includes(x) || x === m),
+                                )
+                              }
+                            />
+                            <span>{m}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <div className="dash-measure-foot">
+                        <span className="rlink" onClick={() => setDashMeasures(DASH_DEFAULT)}>Reset</span>
+                        <span className="rlink" onClick={() => setDashMeasures(DASH_ORDER)}>Select all</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="dash-morefilters"><span className="rlink">More filters</span></div>
+              {dashMore && (
+                <div className="dash-keyword">
+                  <input
+                    value={dashKeyword}
+                    onChange={(e) => setDashKeyword(e.target.value)}
+                    placeholder="Filter report by brand, category, channel or other keyword"
+                  />
+                </div>
+              )}
+              <div className="dash-morefilters">
+                <span className="rlink" onClick={() => setDashMore((v) => !v)}>{dashMore ? 'Less filters' : 'More filters'}</span>
+              </div>
 
               <div className="kpi-grid">
                 {kpis.map((k) => {

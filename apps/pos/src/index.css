@@ -3714,6 +3714,82 @@ input {
   text-align: right;
   margin-bottom: 18px;
 }
+
+/* Dashboard measure picker: which measures get a tile. */
+.dash-measure {
+  position: relative;
+}
+.dash-measure-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  height: 40px;
+  min-width: 190px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 0 12px;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.dash-measure-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  width: 280px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.32);
+  overflow: hidden;
+}
+.dash-measure-list {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 6px;
+}
+.dash-measure-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.dash-measure-opt:hover {
+  background: var(--panel-2);
+}
+.dash-measure-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.dash-keyword {
+  margin-bottom: 10px;
+}
+.dash-keyword input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 0 12px;
+  font: inherit;
+  font-size: 14px;
+}
+.dash-keyword input::placeholder {
+  color: var(--faint);
+}
 .kpi-chart.tall {
   height: 150px;
   margin-bottom: 6px;
