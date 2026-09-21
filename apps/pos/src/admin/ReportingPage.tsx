@@ -37,6 +37,59 @@ const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct
 const kMoney = (v: number) => (v >= 1000 ? `${v / 1000}k` : String(v));
 
 const DAY_MS = 86_400_000;
+
+/**
+ * The measures Lightspeed's sales report can chart, in its order. Lightspeed
+ * keeps "Revenue" and "Revenue (incl. tax)" as separate measures, so the plain
+ * ones here are all net of tax. Its two surcharging measures are left out:
+ * Nova has no surcharges, and a measure that silently equalled Revenue would
+ * read as a real figure.
+ */
+type MeasureKind = 'money' | 'count' | 'percent' | 'decimal' | 'time';
+interface DayTotals {
+  rev: number;
+  tax: number;
+  cogs: number;
+  items: number;
+  disc: number;
+  withCust: number;
+  count: number;
+  customers: number;
+  returns: number;
+  all: number;
+}
+const MEASURES: { label: string; kind: MeasureKind; of: (d: DayTotals) => number }[] = [
+  { label: 'Avg. items per sale', kind: 'decimal', of: (d) => (d.count ? d.items / d.count : 0) },
+  { label: 'Avg. sale value', kind: 'money', of: (d) => (d.count ? Math.round(d.rev / d.count) : 0) },
+  { label: 'Avg. sale value (incl. tax)', kind: 'money', of: (d) => (d.count ? Math.round((d.rev + d.tax) / d.count) : 0) },
+  { label: 'Cost of goods sold', kind: 'money', of: (d) => d.cogs },
+  { label: 'Customer count', kind: 'count', of: (d) => d.customers },
+  { label: 'Discounted', kind: 'money', of: (d) => d.disc },
+  { label: 'Discounted (%)', kind: 'percent', of: (d) => (d.rev + d.disc > 0 ? (d.disc / (d.rev + d.disc)) * 100 : 0) },
+  { label: 'First sale', kind: 'time', of: () => 0 },
+  { label: 'Gross profit', kind: 'money', of: (d) => d.rev - d.cogs },
+  { label: 'Items sold', kind: 'count', of: (d) => d.items },
+  { label: 'Last sale', kind: 'time', of: () => 0 },
+  { label: 'Margin (%)', kind: 'percent', of: (d) => (d.rev > 0 ? ((d.rev - d.cogs) / d.rev) * 100 : 0) },
+  { label: 'Return count', kind: 'count', of: (d) => d.returns },
+  { label: 'Returns (%)', kind: 'percent', of: (d) => (d.all > 0 ? (d.returns / d.all) * 100 : 0) },
+  { label: 'Revenue', kind: 'money', of: (d) => d.rev },
+  { label: 'Revenue (incl. tax)', kind: 'money', of: (d) => d.rev + d.tax },
+  { label: 'Sale count', kind: 'count', of: (d) => d.count },
+  { label: 'Sales with Customer', kind: 'count', of: (d) => d.withCust },
+  { label: 'Sales with customer attached (%)', kind: 'percent', of: (d) => (d.count > 0 ? (d.withCust / d.count) * 100 : 0) },
+  { label: 'Tax', kind: 'money', of: (d) => d.tax },
+];
+const measureOf = (label: string, d: DayTotals): number => (MEASURES.find((m) => m.label === label) ?? MEASURES[14]!).of(d);
+const measureText = (label: string, value: number): string => {
+  const kind = measureKind(label);
+  if (kind === 'money') return fmt(value);
+  if (kind === 'percent') return `${Math.round(value * 10) / 10}%`;
+  if (kind === 'decimal') return String(Math.round(value * 100) / 100);
+  if (kind === 'time') return value ? new Date(value).toLocaleString() : '\u2014';
+  return String(value);
+};
+const measureKind = (label: string): MeasureKind => (MEASURES.find((m) => m.label === label) ?? MEASURES[14]!).kind;
 const startOfDay = (t: number): number => {
   const d = new Date(t);
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
@@ -89,6 +142,37 @@ const daysAgo = (n: number): Date => {
 };
 const rangeLabel = (s: Date, e: Date): string => `${fmtDate(s)} to ${fmtDate(e)}`;
 
+/** Start of the granularity's period containing `d` (weeks start Monday). */
+const startOfUnit = (gran: string, d: Date): Date => {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  if (gran === 'Year') return new Date(x.getFullYear(), 0, 1);
+  if (gran === 'Quarter') return new Date(x.getFullYear(), Math.floor(x.getMonth() / 3) * 3, 1);
+  if (gran === 'Month') return new Date(x.getFullYear(), x.getMonth(), 1);
+  if (gran === 'Week') {
+    x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+    return x;
+  }
+  return x; // Day and Hour both report by day.
+};
+
+/** Move `d` by `n` whole periods of the granularity. */
+const addUnits = (gran: string, d: Date, n: number): Date => {
+  const x = new Date(d);
+  if (gran === 'Year') x.setFullYear(x.getFullYear() + n);
+  else if (gran === 'Quarter') x.setMonth(x.getMonth() + 3 * n);
+  else if (gran === 'Month') x.setMonth(x.getMonth() + n);
+  else if (gran === 'Week') x.setDate(x.getDate() + 7 * n);
+  else x.setDate(x.getDate() + n);
+  return x;
+};
+
+/** Last day of the `n` periods that begin at `start`. */
+const lastDayOf = (gran: string, start: Date, n: number): Date => {
+  const after = addUnits(gran, start, n);
+  after.setDate(after.getDate() - 1);
+  return after;
+};
+
 const parseRange = (rangeStr: string): { start: Date; end: Date } => {
   try {
     const parts = rangeStr.split(' to ');
@@ -132,12 +216,18 @@ function DateRangeField({ value, onApply }: { value: string; onApply: (s: string
   const [year, setYear] = useState(base.getFullYear());
 
   const computed = (): string => {
-    if (opt === 'todate') return rangeLabel(base, base);
-    if (opt === 'prevday') return rangeLabel(daysAgo(1), daysAgo(1));
-    if (opt === 'prevdays') return rangeLabel(daysAgo(prevDays), daysAgo(1));
-    const s = new Date(year, month, day);
-    const e = new Date(year, month, day + rangeDays - 1);
-    return `${fmtDate(s)} to ${fmtDate(e)}`;
+    const thisUnit = startOfUnit(gran, base);
+    if (opt === 'todate') return rangeLabel(thisUnit, base);
+    if (opt === 'prevday') {
+      const start = addUnits(gran, thisUnit, -1);
+      return rangeLabel(start, lastDayOf(gran, start, 1));
+    }
+    if (opt === 'prevdays') {
+      const start = addUnits(gran, thisUnit, -prevDays);
+      return rangeLabel(start, lastDayOf(gran, start, prevDays));
+    }
+    const start = startOfUnit(gran, new Date(year, month, day));
+    return rangeLabel(start, lastDayOf(gran, start, rangeDays));
   };
 
   return (
@@ -394,8 +484,8 @@ export function ReportingPage() {
     const buckets = starts.map((d) => {
       const s0 = d.getTime();
       const s1 = bucketEnd(d);
-      const inB = sales.filter((x) => x.status !== 'Returned' && x.at >= s0 && x.at < s1);
-      const rev = inB.reduce((a, x) => a + x.totalMinor, 0);
+      const inB = sales.filter((x) => x.status !== 'Returned' && x.status !== 'Voided' && x.at >= s0 && x.at < s1);
+      const rev = inB.reduce((a, x) => a + saleRevenue(x), 0);
       const items = inB.reduce((a, x) => a + x.lines.reduce((q, l) => q + l.quantity, 0), 0);
       const custs = new Set(inB.map((x) => x.customer).filter(Boolean)).size;
       const profit = inB.reduce((a, x) => a + saleRevenue(x) - saleCost(x, allProducts), 0);
@@ -413,7 +503,7 @@ export function ReportingPage() {
   // Date range metrics for Sales Report
   const salesParsedRange = useMemo(() => parseRange(salesRange), [salesRange]);
   const salesFiltered = useMemo(() => {
-    return sales.filter((s) => s.status !== 'Returned' && s.at >= salesParsedRange.start.getTime() && s.at <= salesParsedRange.end.getTime());
+    return sales.filter((s) => s.status !== 'Returned' && s.status !== 'Voided' && s.at >= salesParsedRange.start.getTime() && s.at <= salesParsedRange.end.getTime());
   }, [sales, salesParsedRange]);
 
   // Revenue excludes tax; cost of goods is the supplier cost locked in on each
@@ -425,14 +515,39 @@ export function ReportingPage() {
     const margin = revMinor > 0 ? Math.round((profitMinor / revMinor) * 1000) / 10 : 0;
     const taxMinor = salesFiltered.reduce((sum, s) => sum + (s.taxMinor ?? 0), 0);
 
+    const itemsSold = salesFiltered.reduce((sum, s) => sum + s.lines.reduce((q, l) => q + l.quantity, 0), 0);
+    const withCustomer = salesFiltered.filter((s) => !!s.customer).length;
+    const customerCount = new Set(salesFiltered.map((s) => s.customer).filter(Boolean)).size;
+    const discounted = salesFiltered.reduce((sum, s) => sum + (s.discountMinor ?? 0), 0);
+    const count = salesFiltered.length;
+    // Returns are filtered out of the range, so count them from the same window.
+    const inRange = sales.filter((s) => s.at >= salesParsedRange.start.getTime() && s.at <= salesParsedRange.end.getTime());
+    const returnCount = inRange.filter((s) => s.status === 'Returned' || s.status === 'Partially returned').length;
+    const times = salesFiltered.map((s) => s.at).sort((a, b) => a - b);
+
     return {
       revenue: revMinor,
+      revenueInclTax: revMinor + taxMinor,
       cogs: cogsMinor,
       profit: profitMinor,
       margin,
       tax: taxMinor,
+      count,
+      itemsSold,
+      withCustomer,
+      customerCount,
+      discounted,
+      returnCount,
+      returnsPct: inRange.length > 0 ? Math.round((returnCount / inRange.length) * 1000) / 10 : 0,
+      withCustomerPct: count > 0 ? Math.round((withCustomer / count) * 1000) / 10 : 0,
+      discountedPct: revMinor + discounted > 0 ? Math.round((discounted / (revMinor + discounted)) * 1000) / 10 : 0,
+      avgSale: count > 0 ? Math.round(revMinor / count) : 0,
+      avgSaleInclTax: count > 0 ? Math.round((revMinor + taxMinor) / count) : 0,
+      avgItems: count > 0 ? Math.round((itemsSold / count) * 100) / 100 : 0,
+      firstSale: times[0],
+      lastSale: times[times.length - 1],
     };
-  }, [salesFiltered, allProducts]);
+  }, [salesFiltered, allProducts, sales, salesParsedRange]);
 
   // Sales by product / by outlet for the report type selector.
   const salesByProduct = useMemo(() => {
@@ -482,7 +597,7 @@ export function ReportingPage() {
   }, [salesFiltered]);
   // Revenue per day across the range, for the chart view.
   const salesByDay = useMemo(() => {
-    const days: { label: string; rev: number }[] = [];
+    const days: { label: string; rev: number; value: number }[] = [];
     const d = new Date(salesParsedRange.start);
     d.setHours(0, 0, 0, 0);
     const end = salesParsedRange.end.getTime();
@@ -490,12 +605,30 @@ export function ReportingPage() {
     while (d.getTime() <= end && guard < 92) {
       const s0 = d.getTime();
       const s1 = s0 + DAY_MS;
-      days.push({ label: `${MON[d.getMonth()]} ${d.getDate()}`, rev: salesFiltered.filter((s) => s.at >= s0 && s.at < s1).reduce((a, s) => a + saleRevenue(s), 0) });
+      const inD = salesFiltered.filter((s) => s.at >= s0 && s.at < s1);
+      const allD = sales.filter((s) => s.at >= s0 && s.at < s1);
+      const rev = inD.reduce((a, s) => a + saleRevenue(s), 0);
+      const tax = inD.reduce((a, s) => a + (s.taxMinor ?? 0), 0);
+      const cogs = inD.reduce((a, s) => a + saleCost(s, allProducts), 0);
+      const items = inD.reduce((a, s) => a + s.lines.reduce((q, l) => q + l.quantity, 0), 0);
+      const disc = inD.reduce((a, s) => a + (s.discountMinor ?? 0), 0);
+      const withCust = inD.filter((s) => !!s.customer).length;
+      const n = inD.length;
+      days.push({
+        label: `${MON[d.getMonth()]} ${d.getDate()}`,
+        rev,
+        value: measureOf(salesMeasure, {
+          rev, tax, cogs, items, disc, withCust, count: n,
+          customers: new Set(inD.map((s) => s.customer).filter(Boolean)).size,
+          returns: allD.filter((s) => s.status === 'Returned' || s.status === 'Partially returned').length,
+          all: allD.length,
+        }),
+      });
       d.setDate(d.getDate() + 1);
       guard++;
     }
     return days;
-  }, [salesFiltered, salesParsedRange]);
+  }, [salesFiltered, sales, salesParsedRange, allProducts, salesMeasure]);
   const shareNow = () => {
     if (!shareModal) return;
     const recipients = shareModal.recipients.split(/[,;\s]+/).map((r) => r.trim()).filter(Boolean);
@@ -784,7 +917,7 @@ export function ReportingPage() {
       view === 'Day' ? s0 + DAY_MS
       : view === 'Week' ? s0 + 7 * DAY_MS
       : new Date(new Date(s0).getFullYear(), new Date(s0).getMonth() + 1, 1).getTime();
-    return sales.filter((s) => s.status !== 'Returned' && s.at >= s0 && s.at < s1);
+    return sales.filter((s) => s.status !== 'Returned' && s.status !== 'Voided' && s.at >= s0 && s.at < s1);
   }, [sales, view, dashDate]);
 
   // Top sales people for the selected period, grouped by who rang them up.
@@ -793,7 +926,7 @@ export function ReportingPage() {
     for (const s of periodSales) {
       const key = s.soldBy ?? 'Staff';
       const cur = m.get(key) ?? { rev: 0, count: 0, items: 0 };
-      cur.rev += s.totalMinor;
+      cur.rev += saleRevenue(s);
       cur.count += 1;
       cur.items += s.lines.reduce((a, l) => a + l.quantity, 0);
       m.set(key, cur);
@@ -1160,7 +1293,7 @@ export function ReportingPage() {
                     <div className="rep-fg">
                       <label>Measure</label>
                       <select value={salesMeasure} onChange={(e) => setSalesMeasure(e.target.value)}>
-                        <option>Revenue</option><option>Profit</option><option>Tax</option>
+                        {MEASURES.map((m) => <option key={m.label}>{m.label}</option>)}
                       </select>
                     </div>
                   </>
@@ -1213,16 +1346,22 @@ export function ReportingPage() {
               </div>
               {salesView === 'chart' ? (
                 <div className="rep-table wide">
-                  <div className="rep-table-h">Revenue by day</div>
-                  {salesByDay.every((d) => d.rev === 0) ? (
+                  <div className="rep-table-h">{salesMeasure} by day</div>
+                  {measureKind(salesMeasure) === 'time' ? (
+                    <div className="rep-empty">
+                      {salesMeasure === 'First sale'
+                        ? salesMetrics.firstSale ? `First sale in this period: ${new Date(salesMetrics.firstSale).toLocaleString()}` : 'No sales in this period.'
+                        : salesMetrics.lastSale ? `Last sale in this period: ${new Date(salesMetrics.lastSale).toLocaleString()}` : 'No sales in this period.'}
+                    </div>
+                  ) : salesByDay.every((d) => d.value === 0) ? (
                     <div className="rep-empty">No data available for this period.</div>
                   ) : (
                     <div className="rep-bars">
                       {salesByDay.map((d) => {
-                        const max = Math.max(...salesByDay.map((x) => x.rev), 1);
+                        const max = Math.max(...salesByDay.map((x) => x.value), 1);
                         return (
-                          <div key={d.label} className="rep-bar-col" title={`${d.label}: ${fmt(d.rev)}`}>
-                            <div className="rep-bar" style={{ height: `${Math.max(2, (d.rev / max) * 100)}%` }} />
+                          <div key={d.label} className="rep-bar-col" title={`${d.label}: ${measureText(salesMeasure, d.value)}`}>
+                            <div className="rep-bar" style={{ height: `${Math.max(2, (d.value / max) * 100)}%` }} />
                             <span className="rep-bar-l">{d.label}</span>
                           </div>
                         );
