@@ -247,3 +247,83 @@
 @media (max-width: 900px) { .on-three, .on-demos { grid-template-columns: 1fr; } }
 .rc-head.rc-7, .rc-row.rc-7 { grid-template-columns: 1.2fr 0.4fr 1.6fr 1.6fr 0.9fr 1fr 0.9fr; }
 .rep-fg-btn { display: flex; align-items: flex-end; gap: 12px; }
+
+/* ===== Wholesale (Lightspeed's B2B section) ===== */
+.ws-head { padding: 22px 32px 18px; }
+.ws-head .page-title { margin: 0; }
+
+/* Hero: illustration on the left, the pitch and the connect action on the right. */
+.ws-hero {
+  display: grid;
+  grid-template-columns: minmax(200px, 340px) minmax(0, 1fr);
+  gap: 40px;
+  align-items: center;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 34px 32px 38px;
+}
+.ws-hero-art { display: flex; justify-content: center; }
+.ws-art { width: 100%; max-width: 300px; height: auto; }
+.ws-art-bg { fill: var(--panel-2); }
+.ws-art-panel { fill: var(--panel-2); stroke: var(--line); stroke-width: 1.5; }
+.ws-art-accent { fill: var(--primary); opacity: 0.85; }
+.ws-art-fill { fill: var(--primary); opacity: 0.35; }
+.ws-art-line { fill: var(--muted); opacity: 0.45; }
+.ws-art-bar { fill: var(--muted); opacity: 0.35; }
+.ws-art-stroke { fill: none; stroke: var(--primary); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.ws-hero-body { max-width: 720px; }
+.ws-hero-h { font-size: 30px; font-weight: 800; margin: 0 0 14px; line-height: 1.2; }
+.ws-hero-p { font-size: 14px; line-height: 1.6; color: var(--muted); margin: 0 0 18px; }
+.ws-hero-lead { font-size: 14px; margin: 0 0 8px; }
+.ws-hero-list { margin: 0 0 22px; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+.ws-hero-list li { font-size: 13.5px; color: var(--muted); line-height: 1.5; }
+.ws-cta { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; margin-bottom: 16px; }
+.ws-connect { min-width: 190px; height: 44px; }
+.ws-cta-side { display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--muted); }
+.ws-signup { border: 0; background: none; padding: 0; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.ws-connected {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; background: var(--panel-2); margin-bottom: 16px;
+}
+.ws-connected-body { display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--muted); }
+.ws-connected-body b { font-size: 15px; color: var(--text); }
+.ws-fine { font-size: 12.5px; color: var(--muted); margin: 0; }
+
+/* Brand strip. */
+.ws-brands {
+  display: flex; align-items: center; justify-content: space-around; gap: 24px; flex-wrap: wrap;
+  padding: 34px 32px; background: var(--bg);
+}
+.ws-brand { font-size: 17px; font-weight: 800; letter-spacing: 0.06em; color: var(--muted); opacity: 0.75; text-transform: uppercase; }
+
+/* Key features. */
+.ws-features { padding: 28px 32px 40px; background: var(--panel); border-top: 1px solid var(--line); }
+.ws-features-h { font-size: 17px; font-weight: 800; margin: 0 0 16px; }
+.ws-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; align-items: stretch; }
+.ws-card { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); border-radius: 12px; padding: 20px 18px 18px; background: var(--panel-2); }
+.ws-card-art { height: 72px; display: flex; align-items: center; }
+.ws-cart-art { width: 74px; height: 64px; }
+.ws-card-h { font-size: 17px; font-weight: 800; line-height: 1.25; }
+.ws-card-t { font-size: 13px; line-height: 1.5; color: var(--muted); flex: 1; }
+.ws-card-link { border: 0; background: none; padding: 0; font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; margin-top: auto; }
+.ws-card-ic { font-size: 12px; }
+.ws-modal-t { font-size: 13.5px; color: var(--muted); line-height: 1.5; margin: 0 0 16px; }
+
+@media (max-width: 1100px) {
+  .ws-hero { grid-template-columns: 1fr; gap: 24px; }
+  .ws-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 700px) {
+  .ws-grid { grid-template-columns: 1fr; }
+}
+.pm .ws-modal-body { display: block; padding: 20px 22px; }
+.pm:has(.ws-modal-body) { width: min(460px, 92vw); }
+.ws-field { display: block; margin-bottom: 14px; }
+.ws-field > span { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.ws-in {
+  width: 100%; box-sizing: border-box; height: 40px; padding: 0 12px;
+  border: 1px solid var(--line); border-radius: 9px; background: var(--bg); color: var(--text); font: inherit; font-size: 14px;
+}
+.ws-in::placeholder { color: var(--faint); }
+.ws-in:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(75, 61, 245, 0.25); }
