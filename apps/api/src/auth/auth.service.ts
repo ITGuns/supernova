@@ -13,8 +13,7 @@ export interface DemoUser {
 
 // Seeded users for the mock stage (swapped for the DB-backed User table in the hardening pass).
 const USERS: DemoUser[] = [
-  { id: 'u-owner', email: 'owner@nova.local', pin: '1234', firstName: 'Sam', lastName: 'Rivera', role: 'owner' },
-  { id: 'u-alex', email: 'alex@nova.local', pin: '4321', firstName: 'Alex', lastName: 'Kim', role: 'cashier' },
+  { id: 'u-jade', email: 'jade.savage@nova.local', pin: '1234', firstName: 'Jade', lastName: 'Savage', role: 'owner' },
 ];
 
 const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET ?? 'dev-refresh-secret-change-me';

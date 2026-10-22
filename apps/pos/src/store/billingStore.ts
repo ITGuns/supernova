@@ -15,10 +15,10 @@ export interface BillingState {
 export const useBilling = create<BillingState>()(
   persist(
     (set) => ({
-      cardName: 'Alex Kim',
+      cardName: 'Jade Savage',
       cardLast4: '7248',
       cardExpiry: '03 / 2028',
-      recipientEmail: 'alex@nova.local',
+      recipientEmail: 'jade.savage@nova.local',
       set: (patch) => set(patch),
     }),
     { name: 'nova-billing-v1' },

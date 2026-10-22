@@ -108,7 +108,7 @@ create or replace trigger users_updated_at
 create or replace function protect_admin_accounts()
 returns trigger language plpgsql as $$
 begin
-  if old.id in ('u-owner', 'u-jade') then
+  if old.id in ('u-jade') then
     raise exception
       'Cannot delete protected admin account: %. This account is system-protected.',
       old.id;
@@ -366,8 +366,7 @@ insert into security_config (id) values ('00000000-0000-0000-0000-000000000005')
 -- These rows are inserted once and can never be deleted (trigger above).
 insert into users (id, name, email, role, password, enabled, is_owner, av_color, last_seen)
 values
-  ('u-owner', 'Alex Kim',    'alex@nova.local',           'Account owner, Admin', 'alex1234', true, true,  '#4b3df5', 'just now'),
-  ('u-jade',  'Jade Savage', 'jade.savage@nova.local',    'Admin',                'jade1234', true, false, '#7c3aed', 'just now')
+  ('u-jade',  'Jade Savage', 'jade.savage@nova.local',    'Account owner, Admin', 'jade1234', true, true, '#7c3aed', 'just now')
 on conflict (id) do nothing;
 
 -- Promotions, price books and fulfillments (migration 0008)
