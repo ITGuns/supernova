@@ -176,7 +176,7 @@ export const useUsers = create<UserState>()(
       clockOut: () => set({ clockedInAt: null }),
     }),
     {
-      name: 'nova-users-v3',
+      name: 'nova-users-v4',
       // currentUserId is persisted so a page refresh keeps the cashier who
       // logged in, rather than silently reverting sales to the owner account.
       partialize: (s) => ({ users: s.users, clockedInAt: s.clockedInAt, currentUserId: s.currentUserId }),
